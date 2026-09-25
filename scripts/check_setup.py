@@ -9,6 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent import config  # noqa: E402
+from agent.llm import gemini_chat, groq_chat, text_of  # noqa: E402
 
 PING = "Reply with exactly one word: OK"
 
@@ -16,27 +17,27 @@ PING = "Reply with exactly one word: OK"
 def check_groq() -> str:
     if not config.GROQ_API_KEY:
         raise RuntimeError("GROQ_API_KEY is empty")
-    from langchain_groq import ChatGroq
 
     models = {config.GROQ_MODEL}
     if config.USE_STRONG_MODEL:
         models.add(config.GROQ_MODEL_STRONG)
     replies = []
     for model in sorted(models):
-        llm = ChatGroq(model=model, api_key=config.GROQ_API_KEY, temperature=0, max_tokens=5)
-        replies.append(f"{model} -> {llm.invoke(PING).content.strip()!r}")
+        # Same client settings as the agent (reasoning_effort + a budget that covers reasoning).
+        reply = text_of(groq_chat(model, temperature=0, max_tokens=512).invoke(PING))
+        if not reply:
+            raise RuntimeError(f"{model} returned empty content (reasoning used the whole token budget?)")
+        replies.append(f"{model} -> {reply[:20]!r}")
     return "; ".join(replies)
 
 
 def check_gemini() -> str:
     if not config.GOOGLE_API_KEY:
         raise RuntimeError("GOOGLE_API_KEY is empty")
-    from langchain_google_genai import ChatGoogleGenerativeAI
-
-    llm = ChatGoogleGenerativeAI(
-        model=config.GEMINI_MODEL, google_api_key=config.GOOGLE_API_KEY, temperature=0
-    )
-    return f"{config.GEMINI_MODEL} -> {llm.invoke(PING).content.strip()[:20]!r}"
+    reply = text_of(gemini_chat(temperature=0, max_tokens=512).invoke(PING))
+    if not reply:
+        raise RuntimeError(f"{config.GEMINI_MODEL} returned empty content")
+    return f"{config.GEMINI_MODEL} -> {reply[:20]!r}"
 
 
 def check_tavily() -> str:
@@ -63,7 +64,7 @@ def main() -> int:
         ("DuckDuckGo (fallback search)", check_ddg),
     ]
     ok = {}
-    print(f"Strong model mode: {'ON' if config.USE_STRONG_MODEL else 'OFF (dev, 8B)'}\n")
+    print(f"Strong model mode: {'ON' if config.USE_STRONG_MODEL else f'OFF (dev, {config.GROQ_MODEL})'}\n")
     for name, fn in checks:
         try:
             detail = fn()

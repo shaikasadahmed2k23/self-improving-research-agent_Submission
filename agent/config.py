@@ -25,10 +25,14 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
 
 # Models
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
-GROQ_MODEL_STRONG = os.getenv("GROQ_MODEL_STRONG", "llama-3.3-70b-versatile")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
+GROQ_MODEL_STRONG = os.getenv("GROQ_MODEL_STRONG", "openai/gpt-oss-120b")
 USE_STRONG_MODEL = _bool("USE_STRONG_MODEL", False)
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+# gpt-oss models are reasoning models: keep effort low and leave room for reasoning tokens,
+# otherwise the token budget is spent on reasoning and the visible content comes back empty.
+GROQ_REASONING_EFFORT = os.getenv("GROQ_REASONING_EFFORT", "low")
+LLM_MAX_TOKENS = _int("LLM_MAX_TOKENS", 4096)
 
 # Roles that switch to the strong model when USE_STRONG_MODEL is on
 STRONG_ROLES = {"planner", "writer", "critic"}
@@ -47,7 +51,7 @@ MEMORY_DB_PATH = DATA_DIR / "agent_memory.db"
 
 
 def groq_model_for(role: str) -> str:
-    """Pick the Groq model for a node role (dev default: 8B; strong model opt-in)."""
+    """Pick the Groq model for a node role (dev default: gpt-oss-20b; strong model opt-in)."""
     if USE_STRONG_MODEL and role in STRONG_ROLES:
         return GROQ_MODEL_STRONG
     return GROQ_MODEL
