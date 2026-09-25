@@ -17,18 +17,34 @@ def normalize_citations(text: str) -> str:
     return re.sub(r"【\s*(\d+(?:\s*[,;]\s*\d+)*)\s*】", r"[\1]", text)
 
 
+def _ids(group: str) -> list[int]:
+    return [int(n) for n in re.split(r"[,;]", group)]
+
+
 def cited_ids(text: str) -> list[int]:
-    ids = set()
+    """Cited source ids in order of first appearance."""
+    seen: list[int] = []
     for group in _CITATION.findall(text):
-        ids.update(int(n) for n in re.split(r"[,;]", group))
-    return sorted(ids)
+        seen.extend(i for i in _ids(group) if i not in seen)
+    return seen
 
 
-def append_sources(report: str, sources: list[dict]) -> str:
-    """Replace any LLM-written source list with one built from real, cited URLs."""
-    report = _SOURCES_HEADING.sub("", report).rstrip()
+def finalize_citations(report: str, sources: list[dict]) -> str:
+    """Renumber citations 1..n by first appearance, drop unknown ids, append a real Sources list.
+
+    Any Sources/References section the LLM wrote is replaced by one built from actual URLs.
+    """
+    report = _SOURCES_HEADING.sub("", normalize_citations(report)).rstrip()
     by_id = {s["id"]: s for s in sources}
-    lines = [f"{i}. [{by_id[i]['title'] or by_id[i]['url']}]({by_id[i]['url']})" for i in cited_ids(report) if i in by_id]
+    order = [i for i in cited_ids(report) if i in by_id]
+    new_id = {old: new for new, old in enumerate(order, start=1)}
+
+    def renumber(match: re.Match) -> str:
+        ids = sorted({new_id[i] for i in _ids(match.group(1)) if i in new_id})
+        return "[" + ", ".join(map(str, ids)) + "]" if ids else ""
+
+    report = _CITATION.sub(renumber, report)
+    lines = [f"{new_id[i]}. [{by_id[i]['title'] or by_id[i]['url']}]({by_id[i]['url']})" for i in order]
     return report + ("\n\n## Sources\n" + "\n".join(lines) if lines else "") + "\n"
 
 
@@ -41,6 +57,6 @@ def writer(state: AgentState) -> dict:
             HumanMessage(f"Task: {state['task']}\n\nStep findings:\n{findings}"),
         ]
     )
-    report = append_sources(normalize_citations(text_of(msg)), state.get("sources", []))
-    n_cited = len(cited_ids(report.split("## Sources")[0]))
+    report = finalize_citations(text_of(msg), state.get("sources", []))
+    n_cited = len(cited_ids(report.split("\n## Sources\n")[0]))
     return {"draft": report, "trace": [event("writer", "report", f"Draft written ({len(report)} chars, {n_cited} sources cited)")]}

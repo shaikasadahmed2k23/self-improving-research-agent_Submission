@@ -1,63 +1,68 @@
-"""Executor node (M1): one web search per step, then the LLM extracts cited findings.
+"""Executor node: one ReAct turn for the current plan step.
 
-M2 replaces this with a ReAct loop (LLM chooses tools; ToolNode executes them).
+executor -> (tool calls?) -> tools -> executor -> ... -> (plain answer) -> advance
+The LLM sees the whole plan plus the findings of earlier steps, so later steps research the
+entities that earlier steps actually identified.
 """
+from datetime import date
+
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from agent.llm import get_llm, text_of
-from agent.nodes.writer import normalize_citations
-from agent.prompts import EXECUTOR_SYSTEM
+from agent import config
+from agent.llm import get_llm
+from agent.prompts import EXECUTOR_FINALIZE, EXECUTOR_STEP, EXECUTOR_SYSTEM
 from agent.state import AgentState, event
-from agent.tools.search import web_search
+from agent.tools.registry import TOOL_SCHEMAS
 
 
-def _register_sources(existing: list[dict], results: list[dict]) -> tuple[list[dict], list[dict]]:
-    """Add new results to the global source list (dedup by URL); return (all_sources, this_step_sources)."""
-    sources = list(existing)
-    by_url = {s["url"]: s for s in sources}
-    step_sources = []
-    for r in results:
-        src = by_url.get(r["url"])
-        if src is None:
-            src = {**r, "id": len(sources) + 1}
-            sources.append(src)
-            by_url[src["url"]] = src
-        step_sources.append(src)
-    return sources, step_sources
+def _step_prompt(state: AgentState) -> list:
+    idx = state["current_step"]
+    plan = state["plan"]
+    step = plan[idx]
+    previous = "\n\n".join(f"Step {s['id']} - {s['goal']}\n{s['result']}" for s in plan[:idx])
+    human = EXECUTOR_STEP.format(
+        task=state["task"],
+        plan="\n".join(f"{s['id']}. {s['goal']}" for s in plan),
+        previous=previous or "(none yet: this is the first step)",
+        step_id=step["id"],
+        goal=step["goal"],
+        query=step["search_query"],
+    )
+    system = EXECUTOR_SYSTEM.format(today=date.today().isoformat(), max_tool_rounds=config.MAX_REACT_ITERATIONS - 1)
+    return [SystemMessage(system), HumanMessage(human)]
 
 
 def executor(state: AgentState) -> dict:
     idx = state["current_step"]
-    plan = [dict(s) for s in state["plan"]]
-    step = plan[idx]
-    trace = [event("executor", "action", f"Step {step['id']}: web_search({step['search_query']!r})")]
+    step = state["plan"][idx]
+    iterations = state.get("step_iterations", 0)
+    history = list(state.get("messages", []))
+    trace = []
 
-    results = web_search(step["search_query"])
-    sources, step_sources = _register_sources(state.get("sources", []), results)
-    if step_sources:
-        provider = step_sources[0].get("provider", "?")
-        listing = "\n".join(f"[{s['id']}] {s['title']} - {s['url']}" for s in step_sources)
-        trace.append(event("executor", "observation", f"{len(step_sources)} results via {provider}:\n{listing}"))
-        context = "\n\n".join(f"[{s['id']}] {s['title']} ({s['url']})\n{s['content']}" for s in step_sources)
+    new_messages = []
+    if not history:
+        new_messages = _step_prompt(state)
+        trace.append(event("executor", "thought", f"Starting step {step['id']}/{len(state['plan'])}: {step['goal']}"))
+
+    finalize = iterations >= config.MAX_REACT_ITERATIONS - 1
+    if finalize:
+        new_messages.append(HumanMessage(EXECUTOR_FINALIZE))
         llm = get_llm("executor", temperature=0)
-        msg = llm.invoke(
-            [
-                SystemMessage(EXECUTOR_SYSTEM),
-                HumanMessage(
-                    f"Overall task: {state['task']}\nCurrent step: {step['goal']}\n\nSearch results:\n{context}"
-                ),
-            ]
-        )
-        step["result"] = normalize_citations(text_of(msg)) or "No findings extracted."
     else:
-        trace.append(event("executor", "error", "Search returned no results."))
-        step["result"] = "No search results were found for this step."
+        llm = get_llm("executor", tools=TOOL_SCHEMAS, temperature=0)
 
-    step["status"] = "done"
-    plan[idx] = step
-    trace.append(event("executor", "result", f"Step {step['id']} findings:\n{step['result']}"))
-    return {"plan": plan, "sources": sources, "current_step": idx + 1, "trace": trace}
+    ai = llm.invoke(history + new_messages)
+
+    reasoning = (ai.additional_kwargs.get("reasoning_content") or "").strip()
+    if reasoning:
+        trace.append(event("executor", "thought", reasoning[:500]))
+    for call in ai.tool_calls:
+        args = ", ".join(f"{k}={v!r}" for k, v in call["args"].items())
+        trace.append(event("executor", "action", f"{call['name']}({args})"))
+
+    return {"messages": new_messages + [ai], "step_iterations": iterations + 1, "trace": trace}
 
 
 def route_after_executor(state: AgentState) -> str:
-    return "executor" if state["current_step"] < len(state["plan"]) else "writer"
+    last = state["messages"][-1]
+    return "tools" if getattr(last, "tool_calls", None) else "advance"

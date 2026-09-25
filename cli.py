@@ -39,7 +39,7 @@ def main() -> int:
     print(f"TASK: {task}")
     final: dict = {}
     graph = build_graph()
-    for update in graph.stream({"task": task}, config={"recursion_limit": 50}, stream_mode="updates"):
+    for update in graph.stream({"task": task}, config={"recursion_limit": 150}, stream_mode="updates"):
         for _node, delta in update.items():
             for ev in (delta or {}).get("trace", []):
                 print_event(ev)

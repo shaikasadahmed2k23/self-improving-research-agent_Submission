@@ -12,7 +12,7 @@ from agent.state import AgentState, Plan, PlanStep, event
 def planner(state: AgentState) -> dict:
     task = state["task"]
     llm = get_llm("planner", schema=Plan, temperature=0)
-    system = PLANNER_SYSTEM.format(today=date.today().isoformat(), min_steps=3, max_steps=config.MAX_PLAN_STEPS)
+    system = PLANNER_SYSTEM.format(today=date.today().isoformat(), min_steps=1, max_steps=config.MAX_PLAN_STEPS)
     plan: Plan = llm.invoke([SystemMessage(system), HumanMessage(f"Research task: {task}")])
 
     steps = plan.steps[: config.MAX_PLAN_STEPS] if plan and plan.steps else []
