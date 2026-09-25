@@ -26,7 +26,8 @@ def tools(state: AgentState) -> dict:
     sources = state.get("sources", [])
     # Tool calls already made in this step (the scratchpad is reset per step).
     seen = {_call_key(c) for m in state["messages"][:-1] for c in getattr(m, "tool_calls", None) or []}
-    messages, trace = [], []
+    step_id = state["plan"][state["current_step"]]["id"]
+    messages, trace, tool_log, calculations = [], [], [], []
     for call in ai.tool_calls:
         key = _call_key(call)
         if key in seen:
@@ -36,8 +37,13 @@ def tools(state: AgentState) -> dict:
             )
         else:
             text, sources = run_tool(call["name"], call["args"], sources)
+            is_error = text.startswith("Error")
+            tool_log.append({"step": step_id, "tool": call["name"], "args": call["args"], "error": is_error})
+            if call["name"] == "calculator" and not is_error:
+                # run_tool formats calculator output as "<expression> = <result>"
+                calculations.append({"expression": call["args"]["expression"], "result": float(text.rsplit("=", 1)[1])})
         seen.add(key)
         messages.append(ToolMessage(content=text, tool_call_id=call["id"], name=call["name"]))
         kind = "error" if text.startswith("Error") else "observation"
         trace.append(event("tools", kind, _trace_summary(call["name"], text)))
-    return {"messages": messages, "sources": sources, "trace": trace}
+    return {"messages": messages, "sources": sources, "tool_log": tool_log, "calculations": calculations, "trace": trace}

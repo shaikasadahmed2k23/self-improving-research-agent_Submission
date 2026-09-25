@@ -10,7 +10,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from agent import config
 from agent.llm import get_llm
-from agent.prompts import EXECUTOR_FINALIZE, EXECUTOR_STEP, EXECUTOR_SYSTEM
+from agent.prompts import EXECUTOR_FINALIZE, EXECUTOR_INVALID_TOOL, EXECUTOR_STEP, EXECUTOR_SYSTEM
 from agent.state import AgentState, event
 from agent.tools.registry import TOOL_SCHEMAS
 
@@ -51,7 +51,23 @@ def executor(state: AgentState) -> dict:
     else:
         llm = get_llm("executor", tools=TOOL_SCHEMAS, temperature=0)
 
-    ai = llm.invoke(history + new_messages)
+    try:
+        ai = llm.invoke(history + new_messages)
+    except Exception as exc:
+        if finalize or not _is_invalid_tool_call(exc):
+            raise
+        # gpt-oss was trained with built-in browser tools (find/open/search) and sometimes calls them;
+        # Groq rejects the request. Correct the model once, then fall back to answering without tools.
+        trace.append(event("executor", "error", f"Invalid tool call rejected by the API: {_short(exc)}. Retrying with a correction."))
+        new_messages.append(HumanMessage(EXECUTOR_INVALID_TOOL))
+        try:
+            ai = llm.invoke(history + new_messages)
+        except Exception as exc2:
+            if not _is_invalid_tool_call(exc2):
+                raise
+            trace.append(event("executor", "error", "Invalid tool call again; answering without tools."))
+            new_messages.append(HumanMessage(EXECUTOR_FINALIZE))
+            ai = get_llm("executor", temperature=0).invoke(history + new_messages)
 
     reasoning = (ai.additional_kwargs.get("reasoning_content") or "").strip()
     if reasoning:
@@ -61,6 +77,17 @@ def executor(state: AgentState) -> dict:
         trace.append(event("executor", "action", f"{call['name']}({args})"))
 
     return {"messages": new_messages + [ai], "step_iterations": iterations + 1, "trace": trace}
+
+
+def _is_invalid_tool_call(exc: Exception) -> bool:
+    msg = str(exc)
+    return "tool_use_failed" in msg or "Failed to parse tool call" in msg or "not in request.tools" in msg
+
+
+def _short(exc: Exception) -> str:
+    msg = str(exc)
+    start = msg.find("attempted to call tool")
+    return msg[start : start + 80] if start >= 0 else msg[:120]
 
 
 def route_after_executor(state: AgentState) -> str:

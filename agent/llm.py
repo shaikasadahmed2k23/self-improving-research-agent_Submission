@@ -56,20 +56,30 @@ def get_llm(
     temperature: float = 0.2,
     max_tokens: int | None = None,
 ) -> Runnable:
-    """Return a runnable for a node role (planner, executor, writer, critic, ...)."""
+    """Return a runnable for a node role (planner, executor, writer, critic, ...).
 
-    def prepare(llm):
+    Fallback order: the role's Groq model -> other Groq models (separate daily quotas) -> Gemini.
+    """
+
+    def prepare(llm, reasoning_model: bool = False):
         if tools:
             llm = llm.bind_tools(list(tools))
         if schema is not None:
-            llm = llm.with_structured_output(schema)
+            # gpt-oss function-calling output sometimes has invalid JSON escapes (e.g. \'); Groq's strict
+            # JSON-schema mode is constrained decoding and avoids that.
+            if reasoning_model:
+                llm = llm.with_structured_output(schema, method="json_schema", strict=True)
+            else:
+                llm = llm.with_structured_output(schema)
         return llm
 
     candidates = []
     if config.GROQ_API_KEY:
-        candidates.append(
-            prepare(groq_chat(config.groq_model_for(role), temperature=temperature, max_tokens=max_tokens))
-        )
+        primary_model = config.groq_model_for(role)
+        models = [primary_model] + [m for m in config.GROQ_FALLBACK_MODELS if m != primary_model]
+        for model in dict.fromkeys(models):
+            llm = groq_chat(model, temperature=temperature, max_tokens=max_tokens)
+            candidates.append(prepare(llm, is_reasoning_model(model)))
     if config.GOOGLE_API_KEY:
         candidates.append(prepare(gemini_chat(temperature=temperature, max_tokens=max_tokens)))
     if not candidates:

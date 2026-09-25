@@ -18,13 +18,13 @@ def test_calculator_rejects_unsafe(expr):
         calculate(expr)
 
 
-def test_register_sources_dedups_and_keeps_richer_content():
-    sources, matched = registry.register_sources([], [{"url": "u1", "title": "A", "content": "short"}])
+def test_register_sources_dedups_and_keeps_all_seen_text():
+    sources, matched = registry.register_sources([], [{"url": "u1", "title": "A", "content": "snippet $0.33"}])
     sources, matched = registry.register_sources(
-        sources, [{"url": "u1", "title": "A", "content": "much longer text"}, {"url": "u2", "title": "B", "content": ""}]
+        sources, [{"url": "u1", "title": "A", "content": "full page text"}, {"url": "u2", "title": "B", "content": ""}]
     )
     assert [s["id"] for s in sources] == [1, 2]
-    assert sources[0]["content"] == "much longer text"
+    assert "snippet $0.33" in sources[0]["content"] and "full page text" in sources[0]["content"]
     assert [m["id"] for m in matched] == [1, 2]
 
 
@@ -43,3 +43,29 @@ def test_run_tool_errors_become_observations():
     assert "ZeroDivisionError" in text
     text, _ = registry.run_tool("bogus", {}, [])
     assert "unknown tool" in text
+
+
+def test_canonical_url_merges_trailing_slash_www_and_utm():
+    a = registry.canonical_url("https://www.pinecone.io/pricing/")
+    assert a == registry.canonical_url("https://pinecone.io/pricing?utm_source=x")
+    assert a != registry.canonical_url("https://www.pinecone.io/pricing/estimate")
+
+
+def test_search_snippet_and_fetched_page_become_one_source():
+    sources, _ = registry.register_sources(
+        [], [{"url": "https://www.pinecone.io/pricing", "title": "Pricing", "content": "Storage $0.33/GB/mo", "provider": "tavily"}]
+    )
+    sources, (src,) = registry.register_sources(
+        sources, [{"url": "https://www.pinecone.io/pricing/", "title": "Pricing | Pinecone", "content": "$50/month min", "provider": "fetch"}]
+    )
+    assert len(sources) == 1 and src["id"] == 1
+    assert "$0.33" in src["content"] and "$50" in src["content"] and src["provider"] == "fetch"
+
+
+def test_page_view_focuses_on_keywords():
+    from agent.tools.fetch import page_view
+
+    text = "intro " * 2000 + "| Storage | Unlimited $0.33/GB/mo |" + " outro" * 2000
+    view = page_view(text, focus="storage", char_limit=3000)
+    assert "$0.33/GB/mo" in view and len(view) < 3100
+    assert page_view(text, char_limit=100).startswith("intro")

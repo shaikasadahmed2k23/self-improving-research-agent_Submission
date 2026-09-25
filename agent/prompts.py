@@ -17,7 +17,9 @@ You work in a ReAct loop: think about what is missing, call a tool, read the obs
 
 Tools:
 - web_search(query): numbered results with snippets. Start here.
-- fetch_page(url): full text of a page. Use it when snippets lack the exact numbers/details (e.g. official pricing pages).
+- fetch_page(url, focus): full text of a page (JavaScript-rendered content included). Use it when snippets lack the
+  exact numbers/details (e.g. official pricing pages). On long pages pass focus="keywords" to get the relevant passages.
+  These three are the ONLY tools; there is no find/open/browser tool.
 - calculator(expression): exact arithmetic. Use it for every computed number; never do math in your head.
 
 Rules:
@@ -46,6 +48,12 @@ Findings from earlier steps:
 CURRENT STEP {step_id}: {goal}
 Suggested first search: {query}"""
 
+EXECUTOR_INVALID_TOOL = (
+    "Your last tool call was rejected: that tool does not exist. The ONLY tools are web_search(query), "
+    "fetch_page(url, focus) and calculator(expression). There is no find/open/search/browser tool: to find text on "
+    "a page, call fetch_page with the `focus` argument. Continue with a valid tool call or give your final answer."
+)
+
 EXECUTOR_FINALIZE = (
     "Tool budget for this step is used up. Do not call any more tools. "
     "Write the final cited bullet-point findings for the current step now."
@@ -61,3 +69,69 @@ Rules:
 - Keep units exactly as in the findings. If findings conflict, show both values with their citations and note the conflict.
 - If some information could not be found, say so in a short "## Limitations" section.
 - Do NOT write a Sources/References section; it is appended automatically."""
+
+WRITER_REVISION = """
+
+--- REVISION REQUEST ---
+A reviewer rejected the previous draft. Produce a corrected full report that fixes EVERY point below.
+Keep what was correct. For a number flagged "not in cited source", cite the source where it actually appears
+(listed in the flag) or remove/qualify the claim. For unit mismatches, use the unit the source states.
+For contradictions, present both values with their citations and say which is more authoritative (official vendor page > blog).
+
+Reviewer issues:
+{issues}
+
+Failed citation checks:
+{failed_checks}
+
+Previous draft (citation numbers are the same global source numbers used in the findings):
+{previous}"""
+
+CRITIC_SYSTEM = """You are the critic module of a research agent. You review a draft report before it is delivered.
+Judge it against the ORIGINAL TASK and the evidence, and be concrete and strict.
+
+Check, in this order:
+1. Explicit task constraints: requirements stated in the task (e.g. "using the official pricing page", "top 3",
+   "in EUR", "for 10 GB") must be satisfied. Use the tool log: if the task demands a specific source (e.g. an official
+   page) but that page was never fetched, or the key facts are cited to third-party sites instead, that is a
+   constraint violation. List each one in constraint_violations.
+   ONLY requirements literally stated in the task text count. General best practice (e.g. "should prefer official
+   sources" when the task does not say so) is NOT a constraint violation; mention it under issues at most.
+2. Deterministic citation check results (provided): each FAIL is a real error unless it is obviously a number-format
+   false positive. "not_in_source" = misattributed or unsupported number; "unit_mismatch" = wrong unit.
+3. Contradictions: the same fact given different values (e.g. "$25 minimum" vs "no minimum"; "$16/M reads" vs
+   "$0.00000025 per read unit" = $0.25/M) without being flagged and resolved. Convert units before comparing.
+4. Unit correctness and consistency (per GB vs per million dimensions vs per hour, per month vs per year).
+5. Coverage: does the report fully answer every part of the task? What is missing?
+
+Verdict rules:
+- needs_research: new tool work is required (a constraint needs a specific source that was not used, key info is missing,
+  or a contradiction can only be resolved by checking a primary source). Put what to look up in missing_info.
+- needs_rewrite: the collected findings are sufficient, but the report misstates, misattributes, mislabels units,
+  leaves contradictions unflagged, or is poorly structured.
+- accept: score >= {pass_score}, no constraint violations, no unresolved contradictions, no failed citation checks
+  that matter.
+Score 1-10: 9-10 excellent, 7-8 deliverable, 4-6 significant problems, 1-3 wrong or unusable."""
+
+CRITIC_HUMAN = """ORIGINAL TASK: {task}
+
+TOOL LOG (what the agent actually did):
+{tool_log}
+
+SOURCES (global ids used in the draft):
+{sources}
+
+{checks}
+
+DRAFT REPORT:
+{draft}"""
+
+PLANNER_FIXUP_SYSTEM = """You are the planning module of a research agent. Today is {today}.
+A critic reviewed the report and asked for more research. Produce 1-{max_steps} NEW fix-up steps that address ONLY
+the critic's points. Do not repeat completed steps.
+Rules:
+- If a task constraint requires a specific source (e.g. the vendor's official pricing page), the step goal must say
+  exactly that: "fetch_page the official page <URL if known> and extract ...". Put the URL in the goal if it appears
+  in the sources list.
+- For contradictions, the step must check the primary source to decide which value is correct.
+- Suggested search queries must use concrete names, never placeholders."""

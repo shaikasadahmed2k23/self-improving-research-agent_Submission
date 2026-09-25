@@ -14,6 +14,8 @@ def test_duplicate_tool_call_is_not_re_executed(monkeypatch):
     state = {
         "messages": [first, ToolMessage(content="page text", tool_call_id="1"), _ai("2", "https://www.pinecone.io/pricing/")],
         "sources": [],
+        "plan": [{"id": 1}],
+        "current_step": 0,
     }
     out = tools_node.tools(state)
     assert calls == []  # trailing slash / case differences still count as the same call

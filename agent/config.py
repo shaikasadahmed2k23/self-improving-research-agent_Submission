@@ -29,6 +29,11 @@ GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
 GROQ_MODEL_STRONG = os.getenv("GROQ_MODEL_STRONG", "openai/gpt-oss-120b")
 USE_STRONG_MODEL = _bool("USE_STRONG_MODEL", False)
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+# Groq quotas are per model (free tier: ~200k tokens/day each), so the Groq models back each other
+# up before falling back to Gemini (free tier gemini-2.5-flash: only ~20 requests/day).
+GROQ_FALLBACK_MODELS = [
+    m.strip() for m in os.getenv("GROQ_FALLBACK_MODELS", f"{GROQ_MODEL},{GROQ_MODEL_STRONG}").split(",") if m.strip()
+]
 # gpt-oss models are reasoning models: keep effort low and leave room for reasoning tokens,
 # otherwise the token budget is spent on reasoning and the visible content comes back empty.
 GROQ_REASONING_EFFORT = os.getenv("GROQ_REASONING_EFFORT", "low")
@@ -36,6 +41,8 @@ LLM_MAX_TOKENS = _int("LLM_MAX_TOKENS", 4096)
 
 # Roles that switch to the strong model when USE_STRONG_MODEL is on
 STRONG_ROLES = {"planner", "writer", "critic"}
+# Roles that always use the strong model (the critic must catch subtle errors the 20B model makes)
+ALWAYS_STRONG_ROLES = {"critic"}
 
 # Agent limits
 MAX_PLAN_STEPS = _int("MAX_PLAN_STEPS", 6)
@@ -52,6 +59,6 @@ MEMORY_DB_PATH = DATA_DIR / "agent_memory.db"
 
 def groq_model_for(role: str) -> str:
     """Pick the Groq model for a node role (dev default: gpt-oss-20b; strong model opt-in)."""
-    if USE_STRONG_MODEL and role in STRONG_ROLES:
+    if role in ALWAYS_STRONG_ROLES or (USE_STRONG_MODEL and role in STRONG_ROLES):
         return GROQ_MODEL_STRONG
     return GROQ_MODEL

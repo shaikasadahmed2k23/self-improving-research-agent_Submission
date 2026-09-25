@@ -7,6 +7,10 @@ def test_normalize_fullwidth_brackets():
     assert normalize_citations("a【18】 b【13, 14】") == "a[18] b[13, 14]"
 
 
+def test_normalize_gpt_oss_dagger_citations():
+    assert normalize_citations("$0.33/GB【21†L12-L20】 and $50【9†source】 [30†L3]") == "$0.33/GB[21] and $50[9] [30]"
+
+
 def test_cited_ids_in_order_of_first_appearance():
     assert cited_ids("x [13] y [6, 13] z [8][6]") == [13, 6, 8]
 
