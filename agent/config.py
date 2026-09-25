@@ -1,0 +1,53 @@
+"""Central configuration: reads .env once and exposes typed settings."""
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+ROOT_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(ROOT_DIR / ".env")
+
+
+def _bool(name: str, default: bool = False) -> bool:
+    return os.getenv(name, str(default)).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, default))
+    except ValueError:
+        return default
+
+
+# API keys
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
+
+# Models
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+GROQ_MODEL_STRONG = os.getenv("GROQ_MODEL_STRONG", "llama-3.3-70b-versatile")
+USE_STRONG_MODEL = _bool("USE_STRONG_MODEL", False)
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+
+# Roles that switch to the strong model when USE_STRONG_MODEL is on
+STRONG_ROLES = {"planner", "writer", "critic"}
+
+# Agent limits
+MAX_PLAN_STEPS = _int("MAX_PLAN_STEPS", 6)
+MAX_REACT_ITERATIONS = _int("MAX_REACT_ITERATIONS", 4)
+MAX_REVISIONS = _int("MAX_REVISIONS", 2)
+CRITIC_PASS_SCORE = _int("CRITIC_PASS_SCORE", 7)
+PAGE_CHAR_LIMIT = _int("PAGE_CHAR_LIMIT", 3000)
+
+# Paths
+DATA_DIR = ROOT_DIR / "data"
+REPORTS_DIR = ROOT_DIR / "reports"
+MEMORY_DB_PATH = DATA_DIR / "agent_memory.db"
+
+
+def groq_model_for(role: str) -> str:
+    """Pick the Groq model for a node role (dev default: 8B; strong model opt-in)."""
+    if USE_STRONG_MODEL and role in STRONG_ROLES:
+        return GROQ_MODEL_STRONG
+    return GROQ_MODEL
