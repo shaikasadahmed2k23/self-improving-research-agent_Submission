@@ -9,6 +9,8 @@ quota for the day is used up)
 
 Entry for the Techvruk *AI Agentic System Challenge* (2026).
 
+**Slides:** [docs/presentation.pdf](docs/presentation.pdf) ([.pptx](docs/presentation.pptx)) · **Samples:** [samples/](samples/README.md)
+
 ---
 
 ## Contents
@@ -261,7 +263,7 @@ app.py                Streamlit UI (live run, replay, memory tab)
 cli.py                command line
 scripts/              check_setup, critic_eval, show_memory, log_to_trace, deploy helpers
 samples/              sample reports, replayable traces, seed memory
-docs/                 slide outline and demo script
+docs/                 slides (.pptx/.pdf + outline + build script), architecture diagram, demo script
 tests/                pytest suite
 ```
 

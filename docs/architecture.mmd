@@ -1,0 +1,31 @@
+flowchart LR
+    U(["User task"]) --> RES
+    subgraph RES ["1 · Plan and research"]
+        direction TB
+        R["recall<br/><small>lessons + trusted URLs</small>"] --> P["planner<br/><small>1-6 steps</small>"]
+        P --> E["executor<br/><small>ReAct: think → act</small>"]
+        E -- "tool call" --> T["tools<br/><small>search · fetch · calc</small>"]
+        T -- "observation" --> E
+        E --> A["advance<br/><small>next step or done</small>"]
+        A -- "next step" --> E
+    end
+    subgraph REV ["2 · Write and review"]
+        direction TB
+        W["writer<br/><small>cited report</small>"] --> V["verify<br/><small>citation check</small>"]
+        V --> C{"critic<br/><small>gpt-oss-120b</small>"}
+        C -- "needs_rewrite" --> W
+    end
+    subgraph LRN ["3 · Learn"]
+        direction TB
+        F["reflect<br/><small>lessons, source trust</small>"] --> M[("SQLite<br/>memory")]
+    end
+    RES -- "plan done" --> REV
+    REV -- "accept" --> LRN
+    REV -- "needs_research:<br/>fix-up steps" --> RES
+    LRN -. "recalled next run" .-> RES
+    classDef mem fill:#123A2E,stroke:#3DDC97,color:#E6EDF3,stroke-width:2px;
+    classDef check fill:#3A2E12,stroke:#F5B83D,color:#E6EDF3,stroke-width:2px;
+    classDef io fill:#161B26,stroke:#8B98A9,color:#E6EDF3;
+    class R,F,M mem;
+    class V,C check;
+    class U io;
