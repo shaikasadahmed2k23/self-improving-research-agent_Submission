@@ -9,19 +9,37 @@ Pattern: Plan-and-Execute + ReAct executor + Critic/Reflection loop.
 
 ## Stack
 - Python 3.11 (`.venv`), LangGraph (shared `AgentState`), langchain-core 1.x
-- LLM: `agent/llm.py:get_llm(role, tools=, schema=)`. Fallback chain: the role's Groq model → the other gpt-oss model → Gemini
+- LLM: `agent/llm.py:get_llm(role, tools=, schema=)`. Fallback chain: the role's Groq model → the other gpt-oss model →
+  NVIDIA NIM (`NVIDIA_MODEL`, only if `NVIDIA_API_KEY` is set) → Gemini
 - Search: Tavily (primary) with DuckDuckGo (`ddgs`) as fallback. `fetch_page` uses **Tavily Extract** first (it renders
   JavaScript, e.g. pinecone.io/pricing's price table) and falls back to httpx + trafilatura
-- Memory: SQLite (`data/agent_memory.db`); UI: Streamlit; deploy target: HF Spaces
+- Memory: SQLite + FTS5 (`data/agent_memory.db`, override with `MEMORY_DB_PATH`; `agent/memory/schema.sql`, `store.py`).
+  UI: Streamlit; deploy target: HF Spaces
 
 ## Models (set in `.env`, defaults in `agent/config.py`)
 - `GROQ_MODEL=openai/gpt-oss-20b`: dev default for every role. **Groq Llama models are enterprise-only now.**
 - `GROQ_MODEL_STRONG=openai/gpt-oss-120b`: **always used by the critic**; also used by the planner and writer when `USE_STRONG_MODEL=true`
 - `GEMINI_MODEL=gemini-2.5-flash`: last-resort fallback
-- **Free-tier quotas are the real constraint.** Groq: ~200k tokens/day **per model** (rolling 24h). Gemini 2.5 Flash: only
-  **20 requests/day**. Measured cost per run: narrow task on 120B ≈ 15k tokens; broad comparison with revisions ≈ 70-100k.
-  So there is room for only a few full runs per model per day. Save quota for the demo. The CLI prints tokens per model.
-- The only other chat model this Groq key can use is `qwen/qwen3.8-27b` (untested; could serve as a third quota pool).
+- **Free-tier quotas are the real constraint.** Groq per model: **200k tokens/day** (rolling 24h), 1000 requests/day,
+  8000 tokens/min. Only prompt tokens are counted up front ("Requested" in the 429 message); `max_tokens` is not.
+  Gemini 2.5 Flash: only **20 requests/day**. Measured cost per run: narrow task ≈ 15-25k tokens; broad comparison with
+  revisions ≈ 70-100k. The CLI prints tokens per model: if the 20B line is tiny and 120B is large, 20B hit its quota and
+  the chain fell back (this skews comparisons). Check a model's daily use: a 429 message says "Used N".
+- **Dev mode:** `TOKEN_SAVER=true` + `cli.py --dev 1..4` (short preset tasks). Saver limits are caps: 3 steps,
+  3 LLM calls/step, 1 revision, 1200-char page views, 3 results × 300-char snippets, 600-char step context.
+- **NVIDIA NIM** (added Sep 26): OpenAI-compatible (`langchain-openai`), about 40 requests/min, no daily cap published,
+  development use only. **NIM retired gpt-oss-120b on 2026-09-03**; the default is `nvidia/nemotron-3-super-120b-a12b`.
+  Structured output on NIM uses JSON mode + pydantic validation + one retry (`json_mode_structured`), because strict
+  json_schema could not be tested. **The current key returns 403 "Authorization failed" for every model** (the key format
+  is fine; probably account verification). `check_setup.py` shows it; the chain skips past it.
+- Other free options researched (Sep 26): Cerebras is now a $5 / 30-day trial and needs a card (1M tokens/day,
+  gpt-oss-120b). OpenRouter `:free` allows only 50 requests/day. GitHub Models is retired.
+- **`qwen/qwen3.8-27b`** (Groq, third quota pool, `GROQ_MODEL_EXTRA`; chain: 20B → 120B → qwen → NIM → Gemini):
+  tool calling works well. Free tier: **1000 output tokens/min, and `max_tokens` counts up front**, so it is capped at 1000
+  (`GROQ_MAX_TOKENS_CAP`) with 6 retries (429s carry a short retry-after). A run takes about 10 min. Use it with
+  `reasoning_effort="none"`: with thinking on, the thinking alone hit the 1000 cap. **Groq does not enforce strict
+  json_schema for qwen**: it invented keys (`".lessons"`), which pydantic silently turned into empty defaults. So qwen uses
+  function calling, whose arguments Groq validates (`uses_strict_schema()` = gpt-oss only).
 - gpt-oss is a reasoning model. Always use `reasoning_effort=low` (`GROQ_REASONING_EFFORT`) and `max_tokens` ≥ 512 (`LLM_MAX_TOKENS=4096`), or the reasoning uses up the whole budget and the visible content comes back empty.
 - gpt-oss writes citations in its native formats `【n】`, `【n†L1-L3】` and `[n†source]`; `normalize_citations()` in
   `agent/nodes/writer.py` converts them to `[n]`.
@@ -32,8 +50,10 @@ Pattern: Plan-and-Execute + ReAct executor + Critic/Reflection loop.
 
 ## How to run
 ```powershell
-.venv\Scripts\python scripts\check_setup.py            # verify keys: Groq, Gemini, Tavily, DDG
+.venv\Scripts\python scripts\check_setup.py            # verify keys: Groq, NIM, Gemini, Tavily, DDG
 .venv\Scripts\python cli.py "your research task" --out reports\x.md
+$env:TOKEN_SAVER="true"; .venv\Scripts\python cli.py --dev 2   # cheap dev run (add --no-memory to skip recall/reflect)
+.venv\Scripts\python scripts\show_memory.py            # runs, lessons, trusted sources
 .venv\Scripts\python -m pytest tests -q
 .venv\Scripts\python scripts\critic_eval.py            # critic on the fixed failure cases (uses about 40k 120B tokens)
 ```
@@ -52,7 +72,7 @@ To run every role on the 120B model for one run (PowerShell): `$env:GROQ_MODEL="
 | M1 | Thin end-to-end: planner → executor (1 search per step) → writer, CLI | ✅ done |
 | M2 | ReAct executor: tools loop (web_search, fetch_page, calculator), advance node, context from earlier steps, sequential citations, duplicate-call guard | ✅ done |
 | M3 | Deterministic citation check + 120B critic + routing (accept / needs_rewrite / needs_research → fix-up steps), max 2 revisions | ✅ done |
-| M4 | SQLite memory: recall + reflect + save_report | todo |
+| M4 | SQLite memory: recall + reflect + lessons + URL-level trusted sources + save_report | ✅ done (see below) |
 | M5 | Streamlit UI with live trace + Memory tab | todo |
 | M6 | Hardening: fallback test, tool errors, retries, tests. **When all models are out of quota, save the partial report + trace instead of crashing.** | todo |
 | M7 | Deploy to HF Spaces | todo |
@@ -84,12 +104,41 @@ Live runs (Sep 25-26):
 Test tasks: `Compare the pricing of the top 3 managed vector databases` and
 `Using Pinecone's official pricing page, what would 10 GB of storage cost per month on the Standard plan, and how does that compare to the plan's monthly minimum?`
 
+## M4 memory: how it works and results
+- **recall** (no LLM): full-text search for similar past tasks (≥ 2 shared content terms), the top 5 lessons, and trusted URLs
+  from those runs → `state["memory"]`. The lessons and trusted sources go into the **planner** prompt; trusted URLs also go
+  to the **executor**; all lessons go to the **writer** (the reflection's categories are unreliable).
+- **reflect**: (1) URL-level source trust from the final citation check (verified / failed counts + verified facts),
+  (2) one reflect-model call → 1-3 lessons + `source_urls` (stored as *suggested* only if `fetch_page` can read them),
+  (3) recalled lessons are marked used / helpful (helpful = accepted with 0 revisions), (4) the run row and the report file.
+  Lessons that are near-duplicates (word Jaccard ≥ 0.5) only raise `times_seen`.
+- **Fair before/after on qwen** (Sep 26; all roles on qwen, critic on 120B, `LLM_FALLBACKS=false`, `TOKEN_SAVER=true`,
+  fresh `data/agent_memory_qwen.db`). Traces are in `samples/traces/m4-qwen-*.jsonl` and replay in the UI:
+  | Run | Task | Memory used | First critique | Final | Revisions | Tokens |
+  |---|---|---|---|---|---|---|
+  | #1 before | 10 GB (`--dev 2`) | none | 3/10 needs_research (third-party "$3.33", official page not used) | 9 accept | 1 | 28,411 |
+  | #2 | 25 GB (`--dev 4`) | 2 lessons + URL | 6/10 needs_rewrite (derived "$41.75" cited to the page) | 9 accept | 1 | 18,223 |
+  | #3 | 40 GB | 3 lessons + URL | 4/10 (directed-fetch focus missed $0.33 → third-party) | 8 (limit) | 1 | 38,509 |
+  | **#4 after** | 25 GB (`--dev 4`) | 4 lessons + URL | **9/10 accept** | 9 accept | **0** | **13,604 (−52% vs #1)** |
+  Fixes between runs: lessons go to the writer (after #2); verified facts are added to the focus of *any* fetch of a
+  trusted URL, digit terms weigh 3x, and passages are picked by greedy term coverage (after #3).
+- 20B (Sep 26): before run = 1 revision, 17,041 tokens (`samples/traces/m4-20b-before-10gb.jsonl`). The 20B after run
+  was not possible: 20B hit its daily quota (the attempt silently fell back to 120B, which is why `LLM_FALLBACKS` exists).
+
 ## Known behaviour
 - **Tool use:** gpt-oss-20b rarely calls `fetch_page`/`calculator` unless the task asks for them (broad task: 0 fetches).
   **gpt-oss-120b uses them readily** (broad task: 5 fetches incl. `focus`; narrow task: fetch + calculator).
   Consider the 120B model for the executor in the demo if quota allows.
-- The graph: planner → executor ⇄ tools → advance → (executor | writer) → verify → critic → (END | writer | planner).
+- The graph: recall → planner → executor ⇄ tools → advance → (executor | writer) → verify → critic →
+  (reflect → END | writer | planner). `build_graph(use_memory=False)` / `--no-memory` skips recall and reflect.
   Recursion limit 250 in cli.py.
+- **Directed fetch** (executor, no LLM call): at the start of a step, if the goal contains a URL, or names a site that has a
+  trusted page in memory, `fetch_page` is called on it first. Its focus comes from the task and goal terms plus that
+  page's verified facts. This is needed because 20B ignores "fetch_page <URL>" in step goals and in prompts and searches again.
+- `page_view(focus=...)` ranks passages by distinct focus terms, then by the number of `$` amounts. Before this, the first
+  matches (page header) used up the 1200-char budget and $0.33 on pinecone.io/pricing was never shown.
+- 20B reflection with strict json_schema returned `lessons=[]` when the prompt allowed "no lessons". The prompt now requires
+  at least 1 (reflect only calls the LLM when the run had problems).
 - Duplicate tool calls are blocked within a step only; the same page can be fetched again in later steps.
 - When every provider is out of quota the run crashes and partial work is lost. Fix in M6 (graceful stop + partial report).
 - The planner sometimes writes "as of 2024-2025" even though today's date is in its prompt.

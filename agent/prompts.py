@@ -10,7 +10,17 @@ Rules:
 - The suggested search query must contain only concrete terms. NEVER use placeholders such as X, <provider>, [company].
   If the entities are not known yet, write a generic query instead.
 - Cover background first, then specifics (facts, numbers, comparisons), then recent developments if relevant.
-- Do not include a "write the report" step; a separate writer handles that."""
+- Do not include a "write the report" step; a separate writer handles that.
+- If the request includes lessons from past runs, follow them. If it lists a trusted source for what a step needs,
+  make that step read it directly: write "fetch_page <URL> and extract ..." in the goal."""
+
+PLANNER_MEMORY = """
+
+Memory from similar past runs (the agent learned these from its own earlier mistakes):
+Lessons:
+{lessons}
+Trusted sources (their facts were verified by citation checks):
+{sources}"""
 
 EXECUTOR_SYSTEM = """You are the execution module of a research agent, working on ONE step of a larger plan. Today is {today}.
 You work in a ReAct loop: think about what is missing, call a tool, read the observation, repeat, then answer.
@@ -44,7 +54,7 @@ Full plan:
 
 Findings from earlier steps:
 {previous}
-
+{trusted}
 CURRENT STEP {step_id}: {goal}
 Suggested first search: {query}"""
 
@@ -67,6 +77,7 @@ Rules:
   In tables, add a "Source" column holding the citations. Never invent citation numbers.
 - Citations are ONLY source numbers like [6]. Never cite steps ("[Step 3]"), URLs, or source names in brackets.
 - Keep units exactly as in the findings. If findings conflict, show both values with their citations and note the conflict.
+- When a figure comes from both an official vendor page and a third-party site, cite the official page.
 - If some information could not be found, say so in a short "## Limitations" section.
 - Do NOT write a Sources/References section; it is appended automatically."""
 
@@ -125,6 +136,37 @@ SOURCES (global ids used in the draft):
 
 DRAFT REPORT:
 {draft}"""
+
+REFLECT_SYSTEM = """You are the reflection module of a research agent. A run just finished and the critic or the citation
+check found problems (see the review history). Extract 1-3 lessons that would have prevented them, so that future runs on
+similar tasks get it right the first time. Always return at least one lesson: start with the most serious problem
+(constraint violations first).
+Rules for each lesson:
+- General enough to help on similar tasks (other vendors, other amounts), but concrete about the action:
+  name the tool and what to do, e.g. "When a task says to use a vendor's official pricing page, fetch_page that
+  /pricing URL in the first step instead of relying on search snippets."
+- One imperative sentence, at most ~200 characters. No facts, prices or task-specific quantities (like "10 GB").
+- keywords: generic topic words a similar future task would contain (e.g. "pricing", "official", "page"), not numbers.
+- Only lessons backed by a problem that actually occurred in this run.
+source_urls: if a lesson is about a specific page that should have been used (e.g. the vendor's official pricing page
+that was never fetched), give its exact URL: take it from SOURCES SEEN if it is there, otherwise the vendor's canonical
+URL (e.g. https://www.vendor.com/pricing). Each URL is checked before it is stored."""
+
+REFLECT_HUMAN = """TASK: {task}
+
+TOOL LOG:
+{tool_log}
+
+SOURCES SEEN:
+{sources}
+
+REVIEW HISTORY (one entry per critic review; revision 0 is the first draft):
+{history}
+
+FIX-UP STEPS the planner added after rejections:
+{fixups}
+
+OUTCOME: {outcome}"""
 
 PLANNER_FIXUP_SYSTEM = """You are the planning module of a research agent. Today is {today}.
 A critic reviewed the report and asked for more research. Produce 1-{max_steps} NEW fix-up steps that address ONLY

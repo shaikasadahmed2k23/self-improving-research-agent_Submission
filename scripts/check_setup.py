@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent import config  # noqa: E402
-from agent.llm import gemini_chat, groq_chat, text_of  # noqa: E402
+from agent.llm import gemini_chat, groq_chat, nvidia_chat, text_of  # noqa: E402
 
 PING = "Reply with exactly one word: OK"
 
@@ -40,6 +40,15 @@ def check_gemini() -> str:
     return f"{config.GEMINI_MODEL} -> {reply[:20]!r}"
 
 
+def check_nvidia() -> str:
+    if not config.NVIDIA_API_KEY:
+        raise RuntimeError("NVIDIA_API_KEY is empty")
+    reply = text_of(nvidia_chat(temperature=0, max_tokens=512).invoke(PING))
+    if not reply:
+        raise RuntimeError(f"{config.NVIDIA_MODEL} returned empty content")
+    return f"{config.NVIDIA_MODEL} -> {reply[:20]!r}"
+
+
 def check_tavily() -> str:
     if not config.TAVILY_API_KEY:
         raise RuntimeError("TAVILY_API_KEY is empty")
@@ -59,6 +68,7 @@ def check_ddg() -> str:
 def main() -> int:
     checks = [
         ("Groq (primary LLM)", check_groq),
+        ("NVIDIA NIM (fallback LLM)", check_nvidia),
         ("Gemini (fallback LLM)", check_gemini),
         ("Tavily (primary search)", check_tavily),
         ("DuckDuckGo (fallback search)", check_ddg),
@@ -74,7 +84,7 @@ def main() -> int:
             ok[name] = False
             print(f"[FAIL] {name}: {type(exc).__name__}: {str(exc)[:200]}")
 
-    llm_ok = ok["Groq (primary LLM)"] or ok["Gemini (fallback LLM)"]
+    llm_ok = ok["Groq (primary LLM)"] or ok["NVIDIA NIM (fallback LLM)"] or ok["Gemini (fallback LLM)"]
     search_ok = ok["Tavily (primary search)"] or ok["DuckDuckGo (fallback search)"]
     print()
     if llm_ok and search_ok:

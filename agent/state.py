@@ -31,8 +31,23 @@ class Critique(BaseModel):
     )
 
 
+class Lesson(BaseModel):
+    text: str = Field(description="One imperative sentence (max ~200 chars) that would have prevented the problem on similar tasks")
+    category: Literal["tools", "sources", "units", "constraints", "writing"] = Field(description="What the lesson is about")
+    keywords: list[str] = Field(description="2-6 lowercase words a similar future task would contain, e.g. 'pricing', 'official'")
+
+
+class Reflection(BaseModel):
+    lessons: list[Lesson] = Field(default_factory=list, description="1-3 generalizable lessons, one per distinct problem")
+    source_urls: list[str] = Field(
+        default_factory=list,
+        description="Exact URLs of pages a lesson says to use (e.g. the vendor's official pricing page that should have been fetched); empty if none",
+    )
+
+
 class AgentState(TypedDict, total=False):
     task: str
+    memory: dict  # recall output: {similar_runs, lessons: [{id, text, category}], trusted_sources: [{url, title, facts, ...}]}
     plan: list[dict]  # {id, goal, search_query, status: pending|done, result, origin: initial|fixup}
     current_step: int
     messages: Annotated[list[AnyMessage], add_messages]  # ReAct scratchpad for the current step only
@@ -44,10 +59,13 @@ class AgentState(TypedDict, total=False):
     draft: str  # user-facing report: citations renumbered 1..n + Sources list
     checks: list[dict]  # deterministic citation-check results for the current draft
     critique: dict  # Critique.model_dump() + {"final": bool}
+    critiques: Annotated[list[dict], operator.add]  # every critique of this run, for reflection
     revision: int  # number of critic-requested revisions so far
     trace: Annotated[list[dict], operator.add]  # UI/CLI events, append-only
+    run_id: int  # memory row id of this run (set by reflect)
+    report_path: str
 
 
 def event(node: str, kind: str, content: str) -> dict:
-    """One trace entry. kind: plan | thought | action | observation | result | report | check | critique | error."""
+    """One trace entry. kind: memory | plan | thought | action | observation | result | report | check | critique | lesson | error."""
     return {"node": node, "kind": kind, "content": content}

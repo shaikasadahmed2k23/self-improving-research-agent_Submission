@@ -65,19 +65,38 @@ def page_view(text: str, focus: str | None = None, char_limit: int | None = None
     """What the LLM sees: passages around `focus` keywords if given (and found), else the start of the page."""
     limit = char_limit or config.PAGE_CHAR_LIMIT
     if focus:
-        terms = [t for t in re.split(r"[,\s]+", focus.lower()) if len(t) > 2]
-        spans = []
-        for term in terms:
-            for m in re.finditer(re.escape(term), text.lower()):
-                spans.append((max(0, m.start() - FOCUS_RADIUS), min(len(text), m.end() + FOCUS_RADIUS)))
-        if spans:
-            spans.sort()
-            merged = [list(spans[0])]
-            for s, e in spans[1:]:
-                if s <= merged[-1][1]:
-                    merged[-1][1] = max(merged[-1][1], e)
-                else:
-                    merged.append([s, e])
-            out = " […] ".join(text[s:e] for s, e in merged)
-            return out[:limit] + (" …[truncated]" if len(out) > limit else "")
+        passages = _focus_passages(text, focus, limit)
+        if passages:
+            out = " […] ".join(text[s:e] for s, e in passages)
+            return out + (" …[truncated]" if sum(e - s for s, e in passages) < len(text) else "")
     return text[:limit] + (" …[truncated]" if len(text) > limit else "")
+
+
+def _focus_passages(text: str, focus: str, limit: int) -> list[tuple[int, int]]:
+    """Pick windows around focus-term matches, greedily maximising coverage of focus terms not yet shown, within
+    `limit` chars; returned in page order. Terms with digits (e.g. "$0.33", a figure verified on this page before) are
+    far more specific than words, so they weigh 3x; ties go to windows with more prices."""
+    lower = text.lower()
+    weight = {t: 3 if any(ch.isdigit() for ch in t) else 1 for t in re.split(r"[,\s]+", focus.lower()) if len(t) > 2}
+    windows = []
+    for term in weight:
+        for m in re.finditer(re.escape(term), lower):
+            s, e = max(0, m.start() - FOCUS_RADIUS), min(len(text), m.end() + FOCUS_RADIUS)
+            windows.append((s, e, {t for t in weight if t in lower[s:e]}, lower.count("$", s, e)))
+    picked: list[tuple[int, int]] = []
+    covered: set[str] = set()
+    used = 0
+    while used < limit:
+        free = [w for w in windows if all(w[1] <= s or w[0] >= e for s, e in picked)]
+        if not free:
+            break
+        s, e, found, prices = max(
+            free, key=lambda w: (sum(weight[t] for t in w[2] - covered), sum(weight[t] for t in w[2]), w[3])
+        )
+        if e - s > limit - used:  # clip around the window's centre, where the matched term is
+            centre, half = (s + e) // 2, (limit - used) // 2
+            s, e = max(s, centre - half), min(e, centre - half + (limit - used))
+        picked.append((s, e))
+        covered |= found
+        used += e - s
+    return sorted(picked)

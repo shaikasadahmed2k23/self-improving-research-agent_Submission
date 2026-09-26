@@ -5,7 +5,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from agent import config
 from agent.llm import get_llm
-from agent.prompts import PLANNER_FIXUP_SYSTEM, PLANNER_SYSTEM
+from agent.nodes.recall import format_lessons, format_sources, has_memory
+from agent.prompts import PLANNER_FIXUP_SYSTEM, PLANNER_MEMORY, PLANNER_SYSTEM
 from agent.state import AgentState, Plan, PlanStep, event
 
 MAX_FIXUP_STEPS = 3
@@ -22,6 +23,11 @@ def _summary(steps: list[dict]) -> str:
     return "\n".join(f"{s['id']}. {s['goal']}  (search: {s['search_query']})" for s in steps)
 
 
+def _memory_block(state: AgentState) -> str:
+    memory = state.get("memory")
+    return PLANNER_MEMORY.format(lessons=format_lessons(memory), sources=format_sources(memory)) if has_memory(memory) else ""
+
+
 def planner(state: AgentState) -> dict:
     critique = state.get("critique")
     if critique and critique.get("verdict") == "needs_research" and not critique.get("final"):
@@ -30,18 +36,20 @@ def planner(state: AgentState) -> dict:
     task = state["task"]
     llm = get_llm("planner", schema=Plan, temperature=0)
     system = PLANNER_SYSTEM.format(today=date.today().isoformat(), min_steps=1, max_steps=config.MAX_PLAN_STEPS)
-    plan: Plan = llm.invoke([SystemMessage(system), HumanMessage(f"Research task: {task}")])
+    memory_block = _memory_block(state)
+    plan: Plan = llm.invoke([SystemMessage(system), HumanMessage(f"Research task: {task}{memory_block}")])
 
     steps = plan.steps[: config.MAX_PLAN_STEPS] if plan and plan.steps else []
     if not steps:  # degenerate output: fall back to a single direct search
         steps = [PlanStep(goal=task, search_query=task)]
     plan_dicts = _as_dicts(steps, 1, "initial")
+    trace = [event("planner", "memory", "Planner prompt includes memory:" + memory_block)] if memory_block else []
     return {
         "plan": plan_dicts,
         "current_step": 0,
         "sources": [],
         "revision": 0,
-        "trace": [event("planner", "plan", _summary(plan_dicts))],
+        "trace": trace + [event("planner", "plan", _summary(plan_dicts))],
     }
 
 
@@ -57,7 +65,7 @@ def replan(state: AgentState) -> dict:
     sources = "\n".join(f"[{s['id']}] {s['url']}" for s in state.get("sources", []))
     llm = get_llm("planner", schema=Plan, temperature=0)
     system = PLANNER_FIXUP_SYSTEM.format(today=date.today().isoformat(), max_steps=MAX_FIXUP_STEPS)
-    human = f"Task: {state['task']}\n\nCompleted steps:\n{completed}\n\nCritic feedback:\n{feedback}\n\nKnown sources:\n{sources}"
+    human = f"Task: {state['task']}{_memory_block(state)}\n\nCompleted steps:\n{completed}\n\nCritic feedback:\n{feedback}\n\nKnown sources:\n{sources}"
     result: Plan = llm.invoke([SystemMessage(system), HumanMessage(human)])
 
     steps = result.steps[:MAX_FIXUP_STEPS] if result and result.steps else []

@@ -108,7 +108,8 @@ def check_citations(draft: str, sources: list[dict], calculations: list[dict] | 
                     checks.append({**check, "status": "unit_mismatch",
                                    "detail": f"draft says {'/'.join(sorted(missing))}, source says {'/'.join(sorted(src_units - claim_units))}"})
                 else:
-                    checks.append({**check, "status": "verified", "detail": f"found in [{', '.join(map(str, hits))}]"})
+                    checks.append({**check, "status": "verified", "detail": f"found in [{', '.join(map(str, hits))}]",
+                                   "verified_in": list(hits)})
                 continue
 
             d = _decimals(num)

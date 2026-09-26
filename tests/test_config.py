@@ -30,3 +30,14 @@ def test_token_saver_caps_limits(reload_config):
 def test_limits_unchanged_without_token_saver(reload_config):
     cfg = reload_config(MAX_PLAN_STEPS="6")
     assert (cfg.MAX_PLAN_STEPS, cfg.PAGE_CHAR_LIMIT, cfg.STEP_CONTEXT_CHARS) == (6, 3000, 0)
+
+
+def test_json_mode_structured_retries_once_on_invalid_json():
+    from langchain_core.language_models import FakeListChatModel
+
+    from agent.llm import json_mode_structured
+    from agent.state import Plan
+
+    llm = FakeListChatModel(responses=['{"steps": "oops"}', '```json\n{"steps": [{"goal": "g", "search_query": "q"}]}\n```'])
+    plan = json_mode_structured(llm, Plan).invoke([("system", "Plan."), ("human", "task")])
+    assert plan.steps[0].goal == "g"

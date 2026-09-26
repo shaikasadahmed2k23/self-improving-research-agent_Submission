@@ -63,6 +63,9 @@ def _revision_request(state: AgentState) -> str:
 def writer(state: AgentState) -> dict:
     findings = "\n\n".join(f"### Step {s['id']}: {s['goal']}\n{s['result']}" for s in state["plan"])
     human = f"Task: {state['task']}\n\nStep findings:\n{findings}"
+    lessons = (state.get("memory") or {}).get("lessons")
+    if lessons:  # categories from reflection are unreliable, so the writer sees all recalled lessons (at most 5 lines)
+        human += "\n\nLessons from past runs (apply those about writing and citing):\n" + "\n".join(f"- {l['text']}" for l in lessons)
     revising = state.get("revision", 0) > 0 and state.get("critique")
     if revising:
         human += _revision_request(state)

@@ -69,3 +69,14 @@ def test_page_view_focuses_on_keywords():
     view = page_view(text, focus="storage", char_limit=3000)
     assert "$0.33/GB/mo" in view and len(view) < 3100
     assert page_view(text, char_limit=100).startswith("intro")
+
+
+def test_page_view_covers_every_focus_term_within_the_limit():
+    from agent.tools.fetch import page_view
+
+    minimum = "Standard plan minimum commitment rate: $50/month minimum usage. " * 8  # matches many word terms
+    price = "| Storage | Unlimited $0.33/GB/mo |"  # matches the specific figure only
+    text = "intro " * 200 + minimum + "filler " * 300 + price + " tail" * 50
+    view = page_view(text, focus="standard minimum commitment rate storage $0.33", char_limit=1000)
+    assert "$50/month" in view and "$0.33/GB/mo" in view
+    assert len(view) <= 1000 + len(" […] ") + len(" …[truncated]")

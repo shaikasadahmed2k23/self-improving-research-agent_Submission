@@ -71,7 +71,7 @@ def critic(state: AgentState) -> dict:
     if not c["final"]:
         revision += 1
 
-    update = {"critique": c, "revision": revision, "trace": [event("critic", "critique", _critique_text(c, revision))]}
+    update = {"critique": c, "critiques": [c], "revision": revision, "trace": [event("critic", "critique", _critique_text(c, revision))]}
     if c["final"] and c["verdict"] != "accept":
         notes = c["constraint_violations"] + c["issues"] + [f"Missing: {m}" for m in c["missing_info"]]
         update["draft"] = state["draft"].rstrip() + "\n\n## Reviewer notes (unresolved)\n" + "\n".join(f"- {n}" for n in notes) + "\n"

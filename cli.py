@@ -2,6 +2,7 @@
 
 Usage:  python cli.py "Compare the pricing of the top 3 vector databases" [--out report.md]
         python cli.py --dev 2        # short preset test task (pair with TOKEN_SAVER=true while developing)
+Every run is also recorded to data/traces/*.jsonl for replay in the Streamlit app.
 """
 import argparse
 import sys
@@ -9,29 +10,8 @@ import textwrap
 from collections import Counter
 from pathlib import Path
 
-from langchain_core.callbacks import get_usage_metadata_callback
-
 from agent import config
-from agent.graph import build_graph
-
-LABELS = {
-    "plan": "PLAN",
-    "thought": "THINK",
-    "action": "ACT",
-    "observation": "OBSERVE",
-    "result": "RESULT",
-    "report": "REPORT",
-    "check": "VERIFY",
-    "critique": "CRITIQUE",
-    "error": "ERROR",
-}
-APPEND_KEYS = {"trace", "tool_log", "calculations"}
-# Short, cheap tasks for development runs; each still exercises a different path through the agent.
-DEV_TASKS = {
-    1: "What is the monthly minimum spend on Pinecone's Standard plan?",  # single fact
-    2: "Using Pinecone's official pricing page, what would 10 GB of storage cost per month on the Standard plan?",  # fetch + calculator
-    3: "Compare the free tiers of Pinecone and Qdrant Cloud.",  # small comparison
-}
+from agent.runner import DEV_TASKS, LABELS, fold, stream_run
 
 
 def print_event(ev: dict) -> None:
@@ -44,6 +24,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Self-improving research agent (CLI)")
     parser.add_argument("task", nargs="*", help="research task / question")
     parser.add_argument("--dev", type=int, choices=sorted(DEV_TASKS), help="run a short preset test task instead")
+    parser.add_argument("--no-memory", action="store_true", help="skip recall and reflect (no lessons read or saved)")
     parser.add_argument("--out", type=Path, help="also save the final report to this markdown file")
     args = parser.parse_args()
     if bool(args.task) == bool(args.dev):
@@ -61,15 +42,13 @@ def main() -> int:
             f"{config.SEARCH_MAX_RESULTS} results x {config.SNIPPET_CHARS} chars"
         )
     final: dict = {}
-    graph = build_graph()
-    with get_usage_metadata_callback() as usage:
-        for update in graph.stream({"task": task}, config={"recursion_limit": 250}, stream_mode="updates"):
-            for _node, delta in update.items():
-                delta = delta or {}
-                for ev in delta.get("trace", []):
-                    print_event(ev)
-                for key, value in delta.items():  # append-only state fields arrive as increments
-                    final[key] = final.get(key, []) + value if key in APPEND_KEYS else value
+    for node, delta in stream_run(task, use_memory=not args.no_memory):
+        for ev in delta.get("trace", []):
+            print_event(ev)
+        if node == "done":
+            final["tokens"] = delta["tokens"]
+        elif node != "start":
+            fold(final, delta)
 
     report = final.get("draft", "")
     print("\n" + "=" * 80 + "\n" + report)
@@ -78,8 +57,11 @@ def main() -> int:
         print(f"Critic: {c['score']}/10, verdict={c['verdict']}, revisions={final.get('revision', 0)}")
     tools_used = Counter(t["tool"] for t in final.get("tool_log", []))
     print("Tools used: " + (", ".join(f"{k} x{v}" for k, v in tools_used.items()) or "none"))
-    for model, u in usage.usage_metadata.items():
+    for model, u in final["tokens"].items():
         print(f"Tokens [{model}]: {u['total_tokens']:,} (in {u['input_tokens']:,} / out {u['output_tokens']:,})")
+    print(f"Tokens total: {sum(u['total_tokens'] for u in final['tokens'].values()):,}")
+    if final.get("run_id"):
+        print(f"Memory: run #{final['run_id']} saved; report at {final.get('report_path')}")
     if args.out and report:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(report, encoding="utf-8")
