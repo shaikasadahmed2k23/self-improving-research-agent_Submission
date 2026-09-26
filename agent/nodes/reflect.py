@@ -115,9 +115,9 @@ def suggested_sources(urls: list[str], known_keys: set[str]) -> list[dict]:
     return out
 
 
-def save_report(task: str, report: str) -> str:
+def save_report(task: str, report: str, suffix: str = "") -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", task.lower()).strip("-")[:60] or "report"
-    path = config.REPORTS_DIR / f"{date.today().isoformat()}-{slug}.md"
+    path = config.REPORTS_DIR / f"{date.today().isoformat()}-{slug}{suffix}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(report, encoding="utf-8")
     return str(path.relative_to(config.ROOT_DIR)) if path.is_relative_to(config.ROOT_DIR) else str(path)

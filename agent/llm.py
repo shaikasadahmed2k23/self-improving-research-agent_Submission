@@ -5,7 +5,9 @@ fallbacks, because `RunnableWithFallbacks` has no `bind_tools` / `with_structure
 """
 import json
 import logging
+import random
 import re
+import time
 from typing import Any, Sequence
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, convert_to_messages
@@ -16,6 +18,7 @@ from agent import config
 
 # google-genai logs an "automatic function calling" notice on every call; it's noise for us.
 logging.getLogger("google_genai.models").setLevel(logging.ERROR)
+log = logging.getLogger(__name__)
 
 
 def is_reasoning_model(model: str) -> bool:
@@ -46,8 +49,7 @@ def groq_chat(model: str, *, temperature: float = 0.2, max_tokens: int | None = 
         api_key=config.GROQ_API_KEY,
         temperature=temperature,
         max_tokens=min(budget, cap) if cap else budget,
-        # capped models hit their per-minute output limit often; Groq's 429 carries a short retry-after, so wait it out
-        max_retries=6 if cap else 2,
+        max_retries=1,  # rate limits are retried by with_rate_limit_retry; this covers connection errors
         **kwargs,
     )
 
@@ -113,6 +115,56 @@ def json_mode_structured(llm, schema) -> Runnable:
     return RunnableLambda(run)
 
 
+_TRY_AGAIN = re.compile(r"try again in\s+(?:(\d+)h)?(?:(\d+)m)?(?:([\d.]+)s)?", re.I)
+_RETRY_DELAY = re.compile(r"retry_?delay\W+(\d+(?:\.\d+)?)s", re.I)
+
+
+def is_rate_limit(exc: BaseException) -> bool:
+    """429 / quota errors from Groq, NIM (OpenAI SDK) or Gemini."""
+    status = getattr(exc, "status_code", None) or getattr(getattr(exc, "response", None), "status_code", None)
+    text = str(exc).lower()
+    return status == 429 or any(s in text for s in ("rate limit", "rate_limit", "resource_exhausted", "quota"))
+
+
+def retry_after(exc: BaseException) -> float | None:
+    """Seconds the provider asks us to wait: Retry-After header, Groq's "try again in 1m2.5s", Gemini's retryDelay."""
+    headers = getattr(getattr(exc, "response", None), "headers", None) or {}
+    try:
+        if headers.get("retry-after"):
+            return float(headers["retry-after"])
+    except (TypeError, ValueError):
+        pass
+    text = str(exc)
+    m = _TRY_AGAIN.search(text)
+    if m and any(m.groups()):
+        h, mins, secs = (float(g) if g else 0.0 for g in m.groups())
+        return h * 3600 + mins * 60 + secs
+    m = _RETRY_DELAY.search(text)
+    return float(m.group(1)) if m else None
+
+
+def with_rate_limit_retry(runnable: Runnable) -> Runnable:
+    """Wait out short rate limits (per-minute token/request caps) on the same model, with exponential backoff when the
+    provider gives no wait time. Long waits (daily quota) are re-raised at once so the fallback chain moves on."""
+    retries, max_wait = config.LLM_RATE_RETRIES, config.LLM_MAX_WAIT
+
+    def run(value, config):
+        for attempt in range(retries + 1):
+            try:
+                return runnable.invoke(value, config=config)
+            except Exception as exc:
+                if not is_rate_limit(exc) or attempt == retries:
+                    raise
+                wait = retry_after(exc)
+                wait = min(2.0 * 2**attempt, max_wait) if wait is None else wait
+                if wait > max_wait:
+                    raise
+                log.warning("Rate limited (attempt %d/%d); retrying in %.1fs: %s", attempt + 1, retries, wait, str(exc)[:120])
+                time.sleep(wait + random.uniform(0, 0.5))
+
+    return RunnableLambda(run)
+
+
 def get_llm(
     role: str,
     *,
@@ -154,6 +206,7 @@ def get_llm(
     if not candidates:
         raise RuntimeError("No LLM configured: set GROQ_API_KEY and/or GOOGLE_API_KEY in .env")
 
+    candidates = [with_rate_limit_retry(c) for c in candidates]
     primary, *fallbacks = candidates
     return primary.with_fallbacks(fallbacks) if fallbacks and config.LLM_FALLBACKS else primary
 

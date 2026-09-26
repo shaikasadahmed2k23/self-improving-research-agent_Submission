@@ -36,12 +36,14 @@ def tools(state: AgentState) -> dict:
                 "Its result is above. Use it, try something different, or give your final answer."
             )
         else:
-            text, sources = run_tool(call["name"], call["args"], sources)
-            is_error = text.startswith("Error")
-            tool_log.append({"step": step_id, "tool": call["name"], "args": call["args"], "error": is_error})
-            if call["name"] == "calculator" and not is_error:
-                # run_tool formats calculator output as "<expression> = <result>"
-                calculations.append({"expression": call["args"]["expression"], "result": float(text.rsplit("=", 1)[1])})
+            try:
+                text, sources = run_tool(call["name"], call["args"], sources)
+                if call["name"] == "calculator" and not text.startswith("Error"):
+                    # run_tool formats calculator output as "<expression> = <result>"
+                    calculations.append({"expression": call["args"]["expression"], "result": float(text.rsplit("=", 1)[1])})
+            except Exception as exc:  # anything unexpected becomes an observation too; a tool never crashes the run
+                text = f"Error from {call['name']}: {type(exc).__name__}: {str(exc)[:300]}"
+            tool_log.append({"step": step_id, "tool": call["name"], "args": call["args"], "error": text.startswith("Error")})
         seen.add(key)
         messages.append(ToolMessage(content=text, tool_call_id=call["id"], name=call["name"]))
         kind = "error" if text.startswith("Error") else "observation"

@@ -97,14 +97,26 @@ def render_static(state: dict, kinds: list[str]) -> None:
             render_event(box, ev)
 
 
+def render_stopped(stopped: dict) -> None:
+    st.error(f"**Run stopped.** {stopped['message']}")
+    if stopped["kind"] == "quota":
+        st.info("👉 The free-tier quotas are exhausted for now (Groq quotas are rolling 24 h). Switch the sidebar **Mode** to "
+                "**Replay a recorded run** to watch a complete recorded run step by step, or try again later. "
+                "The findings gathered so far are below.")
+    with st.expander("Error details"):
+        st.code(stopped["detail"])
+
+
 def render_result(state: dict) -> None:
+    if state.get("stopped"):
+        render_stopped(state["stopped"])
     report = state.get("draft", "")
     if not report:
         st.warning("The run ended without a report (see the ERROR events in the trace).")
         return
     st.divider()
     head = st.columns([3, 1])
-    head[0].subheader("Final report")
+    head[0].subheader("Partial report" if state.get("stopped") else "Final report")
     head[1].download_button("⬇️ Download report (.md)", report, file_name="research-report.md", mime="text/markdown")
     with st.container(border=True):
         st.markdown(report)
@@ -127,9 +139,9 @@ def research_tab(settings: dict) -> None:
             with st.spinner("Researching… (each step is shown as it happens)"):
                 try:
                     st.session_state["result"] = play(stream_run(task.strip(), use_memory=settings["use_memory"]))
-                except Exception as exc:  # quota exhaustion etc.; the partial trace stays on screen
-                    st.error(f"Run stopped: {type(exc).__name__}: {str(exc)[:300]}")
-                    return
+                except Exception as exc:  # the runner already turns failures into a partial report; this is a last resort
+                    st.session_state["result"] = {"stopped": {"kind": "error", "message": "The run crashed.",
+                                                              "detail": f"{type(exc).__name__}: {str(exc)[:300]}"}}
             render_result(st.session_state["result"])
             return
     else:

@@ -29,9 +29,9 @@ Pattern: Plan-and-Execute + ReAct executor + Critic/Reflection loop.
   3 LLM calls/step, 1 revision, 1200-char page views, 3 results × 300-char snippets, 600-char step context.
 - **NVIDIA NIM** (added Sep 26): OpenAI-compatible (`langchain-openai`), about 40 requests/min, no daily cap published,
   development use only. **NIM retired gpt-oss-120b on 2026-09-03**; the default is `nvidia/nemotron-3-super-120b-a12b`.
-  Structured output on NIM uses JSON mode + pydantic validation + one retry (`json_mode_structured`), because strict
-  json_schema could not be tested. **The current key returns 403 "Authorization failed" for every model** (the key format
-  is fine; probably account verification). `check_setup.py` shows it; the chain skips past it.
+  Structured output on NIM uses JSON mode + pydantic validation + one retry (`json_mode_structured`). **Works with the new
+  key (Sep 26)**: tool calling OK (correct `fetch_page` with focus, 2 s) and strict json_schema also parsed. The old key
+  returned 403 for every model.
 - Other free options researched (Sep 26): Cerebras is now a $5 / 30-day trial and needs a card (1M tokens/day,
   gpt-oss-120b). OpenRouter `:free` allows only 50 requests/day. GitHub Models is retired.
 - **`qwen/qwen3.8-27b`** (Groq, third quota pool, `GROQ_MODEL_EXTRA`; chain: 20B → 120B → qwen → NIM → Gemini):
@@ -76,7 +76,7 @@ To run every role on the 120B model for one run (PowerShell): `$env:GROQ_MODEL="
 | M3 | Deterministic citation check + 120B critic + routing (accept / needs_rewrite / needs_research → fix-up steps), max 2 revisions | ✅ done |
 | M4 | SQLite memory: recall + reflect + lessons + URL-level trusted sources + save_report | ✅ done (see below) |
 | M5 | Streamlit UI (`app.py`): live plan checklist + per-event trace, report + download, replay of recorded runs, Memory tab (charts, lessons, sources, runs), memory on/off | ✅ done (tested with AppTest on replays; live path tested with a stubbed runner, **not yet with a real LLM run in the browser**) |
-| M6 | Hardening: fallback test, tool errors, retries, tests. **When all models are out of quota, save the partial report + trace instead of crashing.** | todo |
+| M6 | Hardening: rate-limit retry/backoff, graceful stop with a partial report + trace, tool errors as observations, UI quota message → Replay | ✅ done |
 | M7 | Deploy to HF Spaces | todo |
 | M8 | README, samples, slides, demo video | todo |
 
@@ -133,6 +133,19 @@ Test tasks: `Compare the pricing of the top 3 managed vector databases` and
   quota-proof demo fallback.**
 - The sidebar memory DB selector sets `config.MEMORY_DB_PATH` for the process (fine for a single-user demo; revisit for HF).
 - Tests: `tests/test_app.py` drives `app.py` with `streamlit.testing.v1.AppTest` (replay, memory tab, toggle → `use_memory`).
+
+## M6 hardening
+- `llm.with_rate_limit_retry` wraps every model in the chain. Short 429s (per-minute caps) are waited out on the same model:
+  it uses the provider's wait time (Retry-After header, Groq "try again in 1m2.5s", Gemini `retryDelay`), else exponential
+  backoff of 2 s × 2^n, up to `LLM_RATE_RETRIES=4`. Waits longer than `LLM_MAX_WAIT=65` s (daily quota) are re-raised at once,
+  so the fallback chain moves on. SDK `max_retries=1` only covers connection errors.
+- `runner._live` never raises. On failure it yields `("stopped", {stopped: {kind: quota|error, message, detail}, draft,
+  report_path})`. The partial report is the last draft if there is one, else the finished step findings + "Not researched
+  yet" + a Sources list; it is saved as `reports/<date>-<slug>-partial.md`, and the trace JSONL is kept. The CLI prints
+  "RUN STOPPED" and exits with code 2. The UI shows the error and, for quota, points to **Replay mode**. Stopped runs are
+  not written to memory (reflect never ran).
+- The tools node wraps each tool call; any exception becomes an `Error from <tool>: ...` observation.
+- Verified end to end with invalid keys for every provider (no quota used): partial report saved, exit code 2.
 
 ## Known behaviour
 - gpt-oss-20b daily quota recovers slowly when it is exhausted: about 1.4k tokens per 10 min (Sep 26 morning).

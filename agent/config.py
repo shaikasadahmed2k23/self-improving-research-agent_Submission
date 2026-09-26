@@ -49,6 +49,9 @@ GROQ_MAX_TOKENS_CAP = {"qwen/qwen3.8-27b": 1000}
 GROQ_REASONING_EFFORT = os.getenv("GROQ_REASONING_EFFORT", "low")
 # false = fail instead of switching models (for fair benchmark runs: a quota error stops the run, and no memory is written)
 LLM_FALLBACKS = _bool("LLM_FALLBACKS", True)
+# Rate limits: wait out short ones (per-minute caps) on the same model; longer waits (daily quota) go to the next model
+LLM_RATE_RETRIES = _int("LLM_RATE_RETRIES", 4)
+LLM_MAX_WAIT = _int("LLM_MAX_WAIT", 65)  # seconds
 LLM_MAX_TOKENS = _int("LLM_MAX_TOKENS", 4096)
 
 # Roles that switch to the strong model when USE_STRONG_MODEL is on

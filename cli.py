@@ -62,11 +62,17 @@ def main() -> int:
     print(f"Tokens total: {sum(u['total_tokens'] for u in final['tokens'].values()):,}")
     if final.get("run_id"):
         print(f"Memory: run #{final['run_id']} saved; report at {final.get('report_path')}")
+    if final.get("stopped"):
+        s = final["stopped"]
+        print(f"\nRUN STOPPED ({s['kind']}): {s['message']}\n  {s['detail']}\n"
+              f"  Partial report saved to {final.get('report_path')}; the trace is in data/traces/.")
+        if s["kind"] == "quota":
+            print("  Try again later (Groq quotas are rolling 24h), or replay a recorded run in the UI.")
     if args.out and report:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(report, encoding="utf-8")
         print(f"Saved report to {args.out}")
-    return 0 if report else 1
+    return 2 if final.get("stopped") else (0 if report else 1)
 
 
 if __name__ == "__main__":
