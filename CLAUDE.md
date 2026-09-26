@@ -79,7 +79,7 @@ To run every role on the 120B model for one run (PowerShell): `$env:GROQ_MODEL="
 | M5 | Streamlit UI (`app.py`): live plan checklist + per-event trace, report + download, replay of recorded runs, Memory tab (charts, lessons, sources, runs), memory on/off | ✅ done (tested with AppTest on replays; live path tested with a stubbed runner, **not yet with a real LLM run in the browser**) |
 | M6 | Hardening: rate-limit retry/backoff, graceful stop with a partial report + trace, tool errors as observations, UI quota message → Replay | ✅ done |
 | M7 | Deploy: Streamlit Community Cloud (HF blocked: Docker Spaces need PRO) + daily live-run cap | ✅ live at https://asad-research-agent.streamlit.app/ |
-| M8 | README, samples, slides, demo video | todo |
+| M8 | README, samples, slides, demo video | README + `samples/outputs/` (3 reports from traces) + `docs/slides.md` + `docs/demo_script.md` done; **still todo: build the actual slide file, record the video, add its link to the README** |
 
 ## Critic test cases (M3): results
 `scripts/critic_eval.py` runs fixed test inputs that reproduce each real failure: **6/6 as expected** (Sep 26).
