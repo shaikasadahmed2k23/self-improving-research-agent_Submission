@@ -2,6 +2,7 @@
 
 Contest entry for the Techvruk "AI Agentic System Challenge" (see ASSIGNMENT.md). **Deadline: Sep 27, 2026, 11:30 PM.**
 Repo: https://github.com/shaikasadahmed2k23/self-improving-research-agent_Submission (branch `main`).
+**Live app: https://asad-research-agent.streamlit.app/** (Streamlit Community Cloud; redeploys automatically on push to `main`).
 
 ## What it is
 A research agent that takes a topic or question, plans research steps, runs each step as a ReAct tool loop (search, fetch, calculate), writes a cited markdown report, reviews it with a critic, and **learns from each run**: lessons and trusted sources are stored in SQLite and checked before the next plan.
@@ -77,7 +78,7 @@ To run every role on the 120B model for one run (PowerShell): `$env:GROQ_MODEL="
 | M4 | SQLite memory: recall + reflect + lessons + URL-level trusted sources + save_report | ✅ done (see below) |
 | M5 | Streamlit UI (`app.py`): live plan checklist + per-event trace, report + download, replay of recorded runs, Memory tab (charts, lessons, sources, runs), memory on/off | ✅ done (tested with AppTest on replays; live path tested with a stubbed runner, **not yet with a real LLM run in the browser**) |
 | M6 | Hardening: rate-limit retry/backoff, graceful stop with a partial report + trace, tool errors as observations, UI quota message → Replay | ✅ done |
-| M7 | Deploy: Streamlit Community Cloud (HF blocked: Docker Spaces need PRO) | 🔄 code ready; the user deploys from share.streamlit.io, then verify the URL |
+| M7 | Deploy: Streamlit Community Cloud (HF blocked: Docker Spaces need PRO) + daily live-run cap | ✅ live at https://asad-research-agent.streamlit.app/ |
 | M8 | README, samples, slides, demo video | todo |
 
 ## Critic test cases (M3): results
@@ -158,6 +159,16 @@ Test tasks: `Compare the pricing of the top 3 managed vector databases` and
 - `app.py:seed_memory()` copies `samples/seed_memory.db` (the qwen M4 memory: 4 runs, 5 lessons) to `MEMORY_DB_PATH` on
   a fresh deployment. `samples/traces/` provides the Replay runs.
 - Public demo caveat: anyone can use the app's API quotas and memory (shared SQLite, resets when the app restarts).
+- **Verified Sep 26** with headless Edge (Playwright, `channel="msedge"`; the Chromium download timed out) as an
+  anonymous visitor: the app loads (the `/-/login` 303 is only Streamlit Cloud's cookie handshake, not a private app),
+  the Memory tab shows the seed (4 runs, 5 lessons, 1 trusted source; DB at `/mount/src/<repo>/data/agent_memory.db`),
+  and replaying `m4-qwen-run4-after-25gb` shows 9/10, 0 revisions, 19 events, the download button and 13,604 tokens.
+  The sidebar confirmed the secrets: 20B executor, 120B critic, token saver on, fallbacks on.
+- **Daily live-run cap** (`agent/usage.py`): `DAILY_RUN_CAP` (default 15, 0 = no limit; set in the Streamlit secrets)
+  counts UI live runs per UTC day in `data/usage.sqlite3` (not `*.db`, so the memory-DB picker ignores it). Check and
+  increment happen in one `BEGIN IMMEDIATE` transaction and are re-checked on click. At the cap, the Run button is
+  disabled and a message points to Replay mode (with the time until the reset). The CLI is not capped. Counts reset
+  when the app restarts (the disk is ephemeral), which is acceptable for a demo.
 
 ## Known behaviour
 - gpt-oss-20b daily quota recovers slowly when it is exhausted: about 1.4k tokens per 10 min (Sep 26 morning).

@@ -9,7 +9,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from agent import config
+from agent import config, usage
 from agent.memory.store import MemoryStore
 from agent.replay import list_traces, load_trace
 from agent.runner import DEV_TASKS, LABELS, fold, stream_run
@@ -55,10 +55,10 @@ def render_plan(box, state: dict) -> None:
         c = state.get("critique")
         if c:
             st.divider()
-            cols = st.columns(3)
+            cols = st.columns(2)
             cols[0].metric("Critic score", f"{c['score']}/10")
-            cols[1].metric("Verdict", c["verdict"])
-            cols[2].metric("Revisions", state.get("revision", 0))
+            cols[1].metric("Revisions", state.get("revision", 0))
+            st.markdown(f"Verdict: **{c['verdict']}**")
 
 
 def play(updates, delay: float = 0.0) -> dict:
@@ -130,13 +130,32 @@ def render_result(state: dict) -> None:
 
 # ---------- tabs -----------------------------------------------------------------------------------------------------
 
+def render_cap_reached(cap: int) -> None:
+    st.info(
+        f"🌙 **Today's live-run limit ({cap}) for this public demo has been reached.** It runs on free-tier API quotas, "
+        f"so live research resets at 00:00 UTC (in {usage.time_until_reset()}).  \n"
+        "👉 Meanwhile, switch the sidebar **Mode** to **Replay a recorded run** to watch complete recorded runs step by "
+        "step, including how the agent learned from its own mistakes, and open the **Memory** tab for the lessons."
+    )
+
+
 def research_tab(settings: dict) -> None:
     if settings["mode"] == "Live run":
         preset = st.selectbox("Example task", ["(write your own)"] + list(DEV_TASKS.values()))
         task = st.text_area("Research task", value="" if preset.startswith("(") else preset, height=80,
                             placeholder="e.g. Compare the pricing of the top 3 managed vector databases")
-        start = st.button("▶️ Run research", type="primary", disabled=not task.strip())
+        cap, used = config.DAILY_RUN_CAP, usage.runs_today()
+        if cap:
+            st.caption(f"Live runs today: {used}/{cap} (public demo limit on free-tier APIs; resets at 00:00 UTC)")
+        cap_reached = bool(cap) and used >= cap
+        if cap_reached:
+            render_cap_reached(cap)
+        start = st.button("▶️ Run research", type="primary", disabled=not task.strip() or cap_reached)
         if start:
+            allowed, _ = usage.claim_run()
+            if not allowed:  # another visitor took the last run meanwhile
+                render_cap_reached(cap)
+                return
             with st.spinner("Researching… (each step is shown as it happens)"):
                 try:
                     st.session_state["result"] = play(stream_run(task.strip(), use_memory=settings["use_memory"]))

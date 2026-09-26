@@ -21,3 +21,4 @@ reports/*
 Thumbs.db
 data/traces/
 deploy/*.local.toml
+data/*.sqlite3

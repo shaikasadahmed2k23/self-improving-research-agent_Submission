@@ -52,6 +52,8 @@ LLM_FALLBACKS = _bool("LLM_FALLBACKS", True)
 # Rate limits: wait out short ones (per-minute caps) on the same model; longer waits (daily quota) go to the next model
 LLM_RATE_RETRIES = _int("LLM_RATE_RETRIES", 4)
 LLM_MAX_WAIT = _int("LLM_MAX_WAIT", 65)  # seconds
+# Public demo protection: live runs started from the UI per UTC day (0 = no limit). The CLI is not capped.
+DAILY_RUN_CAP = _int("DAILY_RUN_CAP", 15)
 LLM_MAX_TOKENS = _int("LLM_MAX_TOKENS", 4096)
 
 # Roles that switch to the strong model when USE_STRONG_MODEL is on
