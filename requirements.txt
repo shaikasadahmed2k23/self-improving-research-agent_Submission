@@ -20,3 +20,6 @@ pydantic>=2.7
 
 # Dev
 pytest>=8.0
+
+# Deploy (scripts/deploy_hf.py; not needed at runtime)
+huggingface_hub>=0.30
