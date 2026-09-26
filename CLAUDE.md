@@ -54,6 +54,8 @@ Pattern: Plan-and-Execute + ReAct executor + Critic/Reflection loop.
 .venv\Scripts\python cli.py "your research task" --out reports\x.md
 $env:TOKEN_SAVER="true"; .venv\Scripts\python cli.py --dev 2   # cheap dev run (add --no-memory to skip recall/reflect)
 .venv\Scripts\python scripts\show_memory.py            # runs, lessons, trusted sources
+.venv\Scripts\python -m streamlit run app.py           # UI; "Replay a recorded run" needs no LLM calls
+.venv\Scripts\python scripts\log_to_trace.py run.log samples\traces\x.jsonl   # old CLI log -> replayable trace
 .venv\Scripts\python -m pytest tests -q
 .venv\Scripts\python scripts\critic_eval.py            # critic on the fixed failure cases (uses about 40k 120B tokens)
 ```
@@ -73,7 +75,7 @@ To run every role on the 120B model for one run (PowerShell): `$env:GROQ_MODEL="
 | M2 | ReAct executor: tools loop (web_search, fetch_page, calculator), advance node, context from earlier steps, sequential citations, duplicate-call guard | ✅ done |
 | M3 | Deterministic citation check + 120B critic + routing (accept / needs_rewrite / needs_research → fix-up steps), max 2 revisions | ✅ done |
 | M4 | SQLite memory: recall + reflect + lessons + URL-level trusted sources + save_report | ✅ done (see below) |
-| M5 | Streamlit UI with live trace + Memory tab | todo |
+| M5 | Streamlit UI (`app.py`): live plan checklist + per-event trace, report + download, replay of recorded runs, Memory tab (charts, lessons, sources, runs), memory on/off | ✅ done (tested with AppTest on replays; live path tested with a stubbed runner, **not yet with a real LLM run in the browser**) |
 | M6 | Hardening: fallback test, tool errors, retries, tests. **When all models are out of quota, save the partial report + trace instead of crashing.** | todo |
 | M7 | Deploy to HF Spaces | todo |
 | M8 | README, samples, slides, demo video | todo |
@@ -125,7 +127,15 @@ Test tasks: `Compare the pricing of the top 3 managed vector databases` and
 - 20B (Sep 26): before run = 1 revision, 17,041 tokens (`samples/traces/m4-20b-before-10gb.jsonl`). The 20B after run
   was not possible: 20B hit its daily quota (the attempt silently fell back to 120B, which is why `LLM_FALLBACKS` exists).
 
+## M5 UI notes
+- `agent/runner.py:stream_run()` is the single entry point (CLI + UI): it yields `(node, delta)` with JSON-safe fields only
+  and records `data/traces/*.jsonl` (gitignored). `samples/traces/` holds committed demo traces. **Replay mode doubles as a
+  quota-proof demo fallback.**
+- The sidebar memory DB selector sets `config.MEMORY_DB_PATH` for the process (fine for a single-user demo; revisit for HF).
+- Tests: `tests/test_app.py` drives `app.py` with `streamlit.testing.v1.AppTest` (replay, memory tab, toggle → `use_memory`).
+
 ## Known behaviour
+- gpt-oss-20b daily quota recovers slowly when it is exhausted: about 1.4k tokens per 10 min (Sep 26 morning).
 - **Tool use:** gpt-oss-20b rarely calls `fetch_page`/`calculator` unless the task asks for them (broad task: 0 fetches).
   **gpt-oss-120b uses them readily** (broad task: 5 fetches incl. `focus`; narrow task: fetch + calculator).
   Consider the 120B model for the executor in the demo if quota allows.
