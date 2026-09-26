@@ -9,6 +9,8 @@ quota for the day is used up)
 
 Entry for the Techvruk *AI Agentic System Challenge* (2026).
 
+**Demo video:** https://drive.google.com/file/d/1F0JM9pqYXwDcrLUteqPyBm-AaQoaiCyP/view?usp=sharing
+
 **Slides:** [docs/presentation.pdf](docs/presentation.pdf) ([.pptx](docs/presentation.pptx)) · **Samples:** [samples/](samples/README.md)
 
 ---
