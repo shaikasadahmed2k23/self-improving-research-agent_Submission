@@ -125,3 +125,12 @@ def test_cli_log_replay_rebuilds_plan_report_and_tokens():
     assert state["critique"] == {"score": 9, "verdict": "accept"} and state["revision"] == 0
     assert state["draft"].startswith("# Report")
     assert updates[-1][1]["tokens"]["openai/gpt-oss-20b"]["total_tokens"] == 1234
+
+
+def test_fresh_deployment_starts_with_the_seed_memory(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "MEMORY_DB_PATH", tmp_path / "agent_memory.db")  # does not exist yet
+    at = AppTest.from_file(APP, default_timeout=30).run()
+    assert not at.exception
+    assert (tmp_path / "agent_memory.db").exists()
+    assert {m.label: m.value for m in at.metric}["Runs"] == "4"  # the qwen M4 learning runs

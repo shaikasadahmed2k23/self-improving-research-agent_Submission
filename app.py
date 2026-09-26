@@ -2,6 +2,7 @@
 
 Run:  streamlit run app.py
 """
+import shutil
 import time
 from pathlib import Path
 
@@ -220,7 +221,16 @@ def sidebar() -> dict:
     return {"mode": mode, "use_memory": use_memory}
 
 
+def seed_memory() -> None:
+    """Fresh deployments (Streamlit Cloud, Docker) start with the memory learned during development."""
+    db, seed = Path(config.MEMORY_DB_PATH), config.ROOT_DIR / "samples" / "seed_memory.db"
+    if not db.exists() and seed.exists():
+        db.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(seed, db)
+
+
 def main() -> None:
+    seed_memory()
     settings = sidebar()
     st.title("Self-Improving Research Agent")
     research, memory = st.tabs(["Research", "Memory"])

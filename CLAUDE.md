@@ -14,7 +14,7 @@ Pattern: Plan-and-Execute + ReAct executor + Critic/Reflection loop.
 - Search: Tavily (primary) with DuckDuckGo (`ddgs`) as fallback. `fetch_page` uses **Tavily Extract** first (it renders
   JavaScript, e.g. pinecone.io/pricing's price table) and falls back to httpx + trafilatura
 - Memory: SQLite + FTS5 (`data/agent_memory.db`, override with `MEMORY_DB_PATH`; `agent/memory/schema.sql`, `store.py`).
-  UI: Streamlit; deploy target: HF Spaces
+  UI: Streamlit; deploy target: **Streamlit Community Cloud** (HF Docker Spaces now need PRO, see M7)
 
 ## Models (set in `.env`, defaults in `agent/config.py`)
 - `GROQ_MODEL=openai/gpt-oss-20b`: dev default for every role. **Groq Llama models are enterprise-only now.**
@@ -77,7 +77,7 @@ To run every role on the 120B model for one run (PowerShell): `$env:GROQ_MODEL="
 | M4 | SQLite memory: recall + reflect + lessons + URL-level trusted sources + save_report | ✅ done (see below) |
 | M5 | Streamlit UI (`app.py`): live plan checklist + per-event trace, report + download, replay of recorded runs, Memory tab (charts, lessons, sources, runs), memory on/off | ✅ done (tested with AppTest on replays; live path tested with a stubbed runner, **not yet with a real LLM run in the browser**) |
 | M6 | Hardening: rate-limit retry/backoff, graceful stop with a partial report + trace, tool errors as observations, UI quota message → Replay | ✅ done |
-| M7 | Deploy to HF Spaces | todo |
+| M7 | Deploy: Streamlit Community Cloud (HF blocked: Docker Spaces need PRO) | 🔄 code ready; the user deploys from share.streamlit.io, then verify the URL |
 | M8 | README, samples, slides, demo video | todo |
 
 ## Critic test cases (M3): results
@@ -146,6 +146,18 @@ Test tasks: `Compare the pricing of the top 3 managed vector databases` and
   not written to memory (reflect never ran).
 - The tools node wraps each tool call; any exception becomes an `Error from <tool>: ...` observation.
 - Verified end to end with invalid keys for every provider (no quota used): partial report saved, exit code 2.
+
+## M7 deploy
+- **HF Spaces is blocked**: `create_repo(space_sdk="docker")` returns **402**: "hosting Gradio and Docker Spaces on free
+  cpu-basic requires a PRO subscription" (Sep 26). The built-in Streamlit SDK is deprecated (HF says use Docker). Nothing
+  was created on HF. `scripts/deploy_hf.py` + `Dockerfile` + `deploy/space_README.md` work as-is if the account gets PRO.
+- **Streamlit Community Cloud** (the user chose it): deploys from the public GitHub repo, branch `main`, file `app.py`. There
+  is no deploy API, so the user clicks through share.streamlit.io. Secrets: paste `deploy/streamlit_secrets.local.toml`
+  (gitignored, generated from `.env` by `scripts/make_streamlit_secrets.py`; template: `deploy/streamlit_secrets.toml`).
+  Root-level secrets become environment variables, which `agent/config.py` reads. Demo defaults are in the same TOML.
+- `app.py:seed_memory()` copies `samples/seed_memory.db` (the qwen M4 memory: 4 runs, 5 lessons) to `MEMORY_DB_PATH` on
+  a fresh deployment. `samples/traces/` provides the Replay runs.
+- Public demo caveat: anyone can use the app's API quotas and memory (shared SQLite, resets when the app restarts).
 
 ## Known behaviour
 - gpt-oss-20b daily quota recovers slowly when it is exhausted: about 1.4k tokens per 10 min (Sep 26 morning).

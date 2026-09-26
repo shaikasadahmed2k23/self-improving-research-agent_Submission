@@ -20,3 +20,4 @@ reports/*
 .DS_Store
 Thumbs.db
 data/traces/
+deploy/*.local.toml
