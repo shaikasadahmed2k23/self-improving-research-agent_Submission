@@ -4,7 +4,6 @@ import logging
 from agent import config
 
 log = logging.getLogger(__name__)
-SNIPPET_CHARS = 800
 
 
 def _tavily(query: str, max_results: int) -> list[dict]:
@@ -26,8 +25,9 @@ def _ddg(query: str, max_results: int) -> list[dict]:
     ]
 
 
-def web_search(query: str, max_results: int = 5) -> list[dict]:
+def web_search(query: str, max_results: int | None = None) -> list[dict]:
     """Return [{title, url, content, provider}]. Never raises; returns [] if all providers fail."""
+    max_results = max_results or config.SEARCH_MAX_RESULTS
     providers = ([_tavily] if config.TAVILY_API_KEY else []) + [_ddg]
     for provider in providers:
         try:
@@ -37,6 +37,6 @@ def web_search(query: str, max_results: int = 5) -> list[dict]:
             continue
         if results:
             for r in results:
-                r["content"] = (r["content"] or "")[:SNIPPET_CHARS]
+                r["content"] = (r["content"] or "")[: config.SNIPPET_CHARS]
             return results
     return []

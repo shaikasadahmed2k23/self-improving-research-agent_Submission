@@ -44,12 +44,28 @@ STRONG_ROLES = {"planner", "writer", "critic"}
 # Roles that always use the strong model (the critic must catch subtle errors the 20B model makes)
 ALWAYS_STRONG_ROLES = {"critic"}
 
+# Development mode that spends fewer tokens: fewer steps, tool rounds and revisions, and tighter
+# truncation of pages, snippets and step context. Saver values are caps: a smaller .env value still wins.
+TOKEN_SAVER = _bool("TOKEN_SAVER", False)
+
+
+def _limit(name: str, normal: int, saver: int) -> int:
+    value = _int(name, normal)
+    if not TOKEN_SAVER:
+        return value
+    return saver if value <= 0 else min(value, saver)  # 0 means "no limit"
+
+
 # Agent limits
-MAX_PLAN_STEPS = _int("MAX_PLAN_STEPS", 6)
-MAX_REACT_ITERATIONS = _int("MAX_REACT_ITERATIONS", 4)
-MAX_REVISIONS = _int("MAX_REVISIONS", 2)
+MAX_PLAN_STEPS = _limit("MAX_PLAN_STEPS", 6, 3)
+MAX_REACT_ITERATIONS = _limit("MAX_REACT_ITERATIONS", 4, 3)
+MAX_REVISIONS = _limit("MAX_REVISIONS", 2, 1)
 CRITIC_PASS_SCORE = _int("CRITIC_PASS_SCORE", 7)
-PAGE_CHAR_LIMIT = _int("PAGE_CHAR_LIMIT", 3000)
+# What the LLM sees of a fetched page, each search snippet, and each earlier step's findings (executor context)
+PAGE_CHAR_LIMIT = _limit("PAGE_CHAR_LIMIT", 3000, 1200)
+SNIPPET_CHARS = _limit("SNIPPET_CHARS", 800, 300)
+SEARCH_MAX_RESULTS = _limit("SEARCH_MAX_RESULTS", 5, 3)
+STEP_CONTEXT_CHARS = _limit("STEP_CONTEXT_CHARS", 0, 600)  # 0 = no limit
 
 # Paths
 DATA_DIR = ROOT_DIR / "data"

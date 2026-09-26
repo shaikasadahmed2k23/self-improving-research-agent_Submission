@@ -15,11 +15,16 @@ from agent.state import AgentState, event
 from agent.tools.registry import TOOL_SCHEMAS
 
 
+def _clip(text: str) -> str:
+    limit = config.STEP_CONTEXT_CHARS
+    return text if not limit or len(text) <= limit else text[:limit] + " …[truncated]"
+
+
 def _step_prompt(state: AgentState) -> list:
     idx = state["current_step"]
     plan = state["plan"]
     step = plan[idx]
-    previous = "\n\n".join(f"Step {s['id']} - {s['goal']}\n{s['result']}" for s in plan[:idx])
+    previous = "\n\n".join(f"Step {s['id']} - {s['goal']}\n{_clip(s['result'])}" for s in plan[:idx])
     human = EXECUTOR_STEP.format(
         task=state["task"],
         plan="\n".join(f"{s['id']}. {s['goal']}" for s in plan),

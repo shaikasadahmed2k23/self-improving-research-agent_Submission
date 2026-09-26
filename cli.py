@@ -1,6 +1,7 @@
 """Run the research agent from the terminal with a live step-by-step trace.
 
 Usage:  python cli.py "Compare the pricing of the top 3 vector databases" [--out report.md]
+        python cli.py --dev 2        # short preset test task (pair with TOKEN_SAVER=true while developing)
 """
 import argparse
 import sys
@@ -10,6 +11,7 @@ from pathlib import Path
 
 from langchain_core.callbacks import get_usage_metadata_callback
 
+from agent import config
 from agent.graph import build_graph
 
 LABELS = {
@@ -24,6 +26,12 @@ LABELS = {
     "error": "ERROR",
 }
 APPEND_KEYS = {"trace", "tool_log", "calculations"}
+# Short, cheap tasks for development runs; each still exercises a different path through the agent.
+DEV_TASKS = {
+    1: "What is the monthly minimum spend on Pinecone's Standard plan?",  # single fact
+    2: "Using Pinecone's official pricing page, what would 10 GB of storage cost per month on the Standard plan?",  # fetch + calculator
+    3: "Compare the free tiers of Pinecone and Qdrant Cloud.",  # small comparison
+}
 
 
 def print_event(ev: dict) -> None:
@@ -34,15 +42,24 @@ def print_event(ev: dict) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Self-improving research agent (CLI)")
-    parser.add_argument("task", nargs="+", help="research task / question")
+    parser.add_argument("task", nargs="*", help="research task / question")
+    parser.add_argument("--dev", type=int, choices=sorted(DEV_TASKS), help="run a short preset test task instead")
     parser.add_argument("--out", type=Path, help="also save the final report to this markdown file")
     args = parser.parse_args()
-    task = " ".join(args.task)
+    if bool(args.task) == bool(args.dev):
+        parser.error("give either a task or --dev N")
+    task = DEV_TASKS[args.dev] if args.dev else " ".join(args.task)
 
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
 
     print(f"TASK: {task}")
+    if config.TOKEN_SAVER:
+        print(
+            f"TOKEN_SAVER on: <= {config.MAX_PLAN_STEPS} steps, {config.MAX_REACT_ITERATIONS} LLM calls/step, "
+            f"{config.MAX_REVISIONS} revision(s), pages {config.PAGE_CHAR_LIMIT} chars, "
+            f"{config.SEARCH_MAX_RESULTS} results x {config.SNIPPET_CHARS} chars"
+        )
     final: dict = {}
     graph = build_graph()
     with get_usage_metadata_callback() as usage:
